@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, Check } from 'lucide-react';
+import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, Check, Bookmark, Book, Waves } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount, useWriteContract, useConfig, useBalance } from 'wagmi';
 import { parseUnits, formatUnits, isAddress } from 'viem';
@@ -22,6 +22,7 @@ export function FlowBuilder() {
   const [txStep, setTxStep] = useState<'idle' | 'approving' | 'executing' | 'success'>('idle');
   const [lastTxHash, setLastTxHash] = useState('');
   const [showCard, setShowCard] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [ruleName, setRuleName] = useState('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
   
@@ -34,7 +35,8 @@ export function FlowBuilder() {
   
   const config = useConfig();
   const { writeContractAsync } = useWriteContract();
-  const { rules, addRule, addToHistory } = useFlowStore();
+  const { rules, addRule, addToHistory, savedAddresses, addAddress, removeAddress } = useFlowStore();
+  const [showAddressBook, setShowAddressBook] = useState(false);
   const { data: balance } = useBalance({
     address,
     token: USDC_ADDRESS as `0x${string}`,
@@ -72,7 +74,7 @@ export function FlowBuilder() {
   };
 
   const handleSelectRule = (id: string) => {
-    const rule = rules.find(r => r.id === id);
+    const rule = rules?.find(r => r.id === id);
     if (rule) {
       setAllocations([...rule.allocations]);
       setSelectedRuleId(id);
@@ -133,6 +135,18 @@ export function FlowBuilder() {
       });
 
       setShowCard(true);
+
+      // Auto-save recipients to Address Book
+      if (allocations) {
+        allocations.forEach(alloc => {
+          if (alloc.address && isAddress(alloc.address)) {
+            const exists = savedAddresses?.find(a => a.address.toLowerCase() === alloc.address.toLowerCase());
+            if (!exists) {
+              addAddress({ label: alloc.label || 'Recent Wallet', address: alloc.address });
+            }
+          }
+        });
+      }
     } catch (error) {
       console.error(error);
       setTxStep('idle');
@@ -145,22 +159,34 @@ export function FlowBuilder() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadCard = () => {
+  const downloadCard = async () => {
     const node = document.getElementById('viral-card');
     if (node) {
-      toPng(node)
-        .then((dataUrl) => {
-          const link = document.createElement('a');
-          link.download = `stableflow-${Date.now()}.png`;
-          link.href = dataUrl;
-          link.click();
-        })
-        .catch((err) => console.error(err));
+      setIsGenerating(true);
+      try {
+        // Wait a bit for fonts to render
+        await new Promise(r => setTimeout(r, 500));
+        const dataUrl = await toPng(node, { 
+          cacheBust: true,
+          style: {
+            transform: 'scale(1)',
+            transformOrigin: 'top left'
+          }
+        });
+        const link = document.createElement('a');
+        link.download = `stableflow-receipt-${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
+      } catch (err) {
+        console.error('Failed to generate image:', err);
+      } finally {
+        setIsGenerating(false);
+      }
     }
   };
 
   const shareOnX = () => {
-    const text = `I just automated my stablecoins with @StableFlow.\n${amount} USDC → split into ${allocations.length} wallets.\nBuilt on Arc Network. 🌊`;
+    const text = `I just automated my stablecoins with @StableFlow.\n${amount} USDC → flowed via @ArcNetwork. 🌊`;
     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -196,7 +222,7 @@ export function FlowBuilder() {
                 animate={{ width: `${alloc.percentage}%` }}
                 className={`h-full border-r border-black/20 last:border-none`}
                 style={{ 
-                  backgroundColor: `hsl(${220 + (i * 25)}, 70%, ${50 - (i * 5)}%)`,
+                   backgroundColor: `hsl(${220 + (i * 25)}, 70%, ${50 - (i * 5)}%)`,
                 }}
               />
             ))}
@@ -211,7 +237,7 @@ export function FlowBuilder() {
           </div>
         </div>
 
-        { (rules.length > 0 || PRESETS.length > 0) && (
+        { (rules?.length > 0 || PRESETS.length > 0) && (
           <div className="mb-8 space-y-4">
             <div className="flex items-center gap-4">
               <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Templates:</label>
@@ -235,7 +261,7 @@ export function FlowBuilder() {
               </div>
             </div>
 
-            {rules.length > 0 && (
+            {rules?.length > 0 && (
               <div className="flex items-center gap-4">
                 <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Your Rules:</label>
                 <div className="flex flex-wrap gap-2">
@@ -255,11 +281,45 @@ export function FlowBuilder() {
                 </div>
               </div>
             )}
+
+            <div className="flex items-center gap-4">
+              <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Address Book:</label>
+              <button
+                onClick={() => setShowAddressBook(!showAddressBook)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium hover:bg-blue-500/20 transition-all"
+              >
+                <Book className="w-3 h-3" />
+                {savedAddresses?.length || 0} Saved
+              </button>
+              
+              {showAddressBook && savedAddresses?.length > 0 && (
+                <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {savedAddresses.map((addr) => (
+                    <button
+                      key={addr.id}
+                      onClick={() => {
+                        // Find first empty address or add new
+                        const emptyIndex = allocations.findIndex(a => !a.address);
+                        if (emptyIndex !== -1) {
+                          handleUpdateAllocation(emptyIndex, 'address', addr.address);
+                          handleUpdateAllocation(emptyIndex, 'label', addr.label);
+                        } else if (allocations.length < 5) {
+                          setAllocations([...allocations, { label: addr.label, address: addr.address, percentage: 0 }]);
+                        }
+                      }}
+                      className="px-2 py-1 rounded bg-white/5 text-[10px] text-white/60 hover:bg-white/10 hover:text-white border border-white/5 transition-all"
+                    >
+                      {addr.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         <div className="space-y-4">
-          <div className="grid grid-cols-[1fr_2fr_100px_40px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
+          <div className="grid grid-cols-[1fr_2fr_100px_80px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
             <div>Label</div>
             <div>Wallet Address</div>
             <div>Percent</div>
@@ -273,7 +333,7 @@ export function FlowBuilder() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="grid grid-cols-[1fr_2fr_100px_40px] gap-4 items-center bg-white/[0.02] p-2 rounded-xl border border-white/[0.05]"
+                className="grid grid-cols-[1fr_2fr_100px_80px] gap-4 items-center bg-white/[0.02] p-2 rounded-xl border border-white/[0.05]"
               >
                 <input
                   type="text"
@@ -298,13 +358,27 @@ export function FlowBuilder() {
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 text-[10px]">%</span>
                 </div>
-                <button
-                  onClick={() => handleRemoveAllocation(index)}
-                  disabled={allocations.length <= 2}
-                  className="text-white/20 hover:text-red-400 transition-colors disabled:opacity-0"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      if (alloc.address && isAddress(alloc.address)) {
+                        addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                      }
+                    }}
+                    disabled={!isAddress(alloc.address)}
+                    className="text-white/20 hover:text-blue-400 transition-colors disabled:opacity-30 p-1"
+                    title="Save to Address Book"
+                  >
+                    <Bookmark className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleRemoveAllocation(index)}
+                    disabled={allocations.length <= 2}
+                    className="text-white/20 hover:text-red-400 transition-colors disabled:opacity-0 p-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -329,15 +403,9 @@ export function FlowBuilder() {
             <button
               onClick={handleSaveRule}
               disabled={!ruleName || totalPercentage !== 100}
-              className="px-6 py-2 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-sm font-bold rounded-xl border border-blue-500/20 transition-all"
+              className="px-6 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-500/20 transition-all"
             >
               Save Rule
-            </button>
-            <button
-              onClick={() => alert('Rules synced with Shelby Protocol.')}
-              className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white/50 text-sm font-bold rounded-xl transition-all"
-            >
-              Sign & Sync
             </button>
           </div>
         </div>
@@ -381,7 +449,7 @@ export function FlowBuilder() {
                   ) : !allAddressesValid ? (
                     <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Invalid Addresses</span>
                   ) : (
-                    <span className="text-[10px] text-green-400/60 font-bold uppercase tracking-wider">Ready to Split</span>
+                    <span className="text-[10px] text-green-400/60 font-bold uppercase tracking-wider">Ready to Flow</span>
                   )}
                 </div>
                 <button
@@ -395,10 +463,19 @@ export function FlowBuilder() {
                       <Send className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                     </>
                   ) : (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>{txStep === 'approving' ? 'Approving...' : 'Executing...'}</span>
-                    </>
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">{txStep === 'approving' ? 'Step 1: Approving' : 'Step 2: Executing'}</span>
+                      </div>
+                      <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: txStep === 'approving' ? '50%' : '100%' }}
+                          className="h-full bg-blue-500"
+                        />
+                      </div>
+                    </div>
                   )}
                 </button>
               </>
@@ -429,33 +506,45 @@ export function FlowBuilder() {
                 <X className="w-8 h-8" />
               </button>
 
-              <div id="viral-card" className="bg-gradient-to-br from-[#050505] to-[#121212] p-8 rounded-[32px] border border-white/10 shadow-2xl relative overflow-hidden">
-                {/* Decoration */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-3xl rounded-full" />
-                <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/5 blur-3xl rounded-full" />
+              <div id="viral-card" className="bg-[#080808] p-10 rounded-[40px] border border-white/10 shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                {/* Visual Flair */}
+                <div className="absolute top-[-10%] right-[-10%] w-[150px] h-[150px] bg-blue-500/20 blur-[60px] rounded-full" />
+                <div className="absolute bottom-[-10%] left-[-10%] w-[150px] h-[150px] bg-purple-500/10 blur-[60px] rounded-full" />
+                <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-[0.03] pointer-events-none" />
                 
                 <div className="relative z-10 flex flex-col items-center text-center">
-                  <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/20">
-                    <CheckCircle2 className="w-10 h-10 text-white" />
+                  <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-blue-400 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-blue-500/40 rotate-3 group-hover:rotate-0 transition-transform duration-500">
+                    <Waves className="w-10 h-10 text-white" />
                   </div>
                   
-                  <h3 className="text-2xl font-bold text-white mb-2">Flow Executed</h3>
-                  <p className="text-white/40 text-sm mb-8">StableFlow Execution Complete</p>
+                  <h3 className="text-3xl font-bold text-white mb-2 tracking-tight">Flow Executed</h3>
+                  <div className="flex items-center gap-2 mb-10">
+                    <span className="h-[1px] w-4 bg-white/20" />
+                    <p className="text-blue-400/80 text-xs font-bold uppercase tracking-[0.3em]">StableFlow Protocol</p>
+                    <span className="h-[1px] w-4 bg-white/20" />
+                  </div>
                   
-                  <div className="w-full bg-white/[0.03] rounded-2xl p-6 border border-white/[0.05] mb-8">
-                    <p className="text-xs font-bold text-white/30 uppercase tracking-[0.2em] mb-4">Total Processed</p>
-                    <p className="text-4xl font-mono font-bold text-white mb-6">
-                      {parseFloat(amount).toLocaleString()} <span className="text-lg font-sans text-blue-500">USDC</span>
+                  <div className="w-full bg-white/[0.02] backdrop-blur-sm rounded-[32px] p-8 border border-white/[0.05] mb-8 shadow-inner">
+                    <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.25em] mb-4">Total Distribution</p>
+                    <p className="text-5xl font-mono font-bold text-white mb-8 tracking-tighter">
+                      {parseFloat(amount).toLocaleString()} <span className="text-xl font-sans text-blue-500">USDC</span>
                     </p>
                     
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {allocations.map((a, i) => (
                         <div key={i} className="flex justify-between items-center text-sm">
-                          <span className="text-white/60">{a.label}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-mono">{a.percentage}%</span>
-                            <div className="w-12 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div className="h-full bg-blue-500" style={{ width: `${a.percentage}%` }} />
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, 50%)` }} />
+                            <span className="text-white/70 font-medium">{a.label}</span>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-white font-mono font-bold">{a.percentage}%</span>
+                            <div className="w-20 h-2 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${a.percentage}%` }}
+                                className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" 
+                              />
                             </div>
                           </div>
                         </div>
@@ -463,18 +552,16 @@ export function FlowBuilder() {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col items-center gap-4 w-full">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-white/20 uppercase tracking-[0.3em]">
-                      <div className="w-8 h-[1px] bg-white/10" />
-                      Powered by Arc Network
-                      <div className="w-8 h-[1px] bg-white/10" />
+                  <div className="flex flex-col items-center gap-4 w-full pt-4">
+                    <div className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[9px] font-bold text-white/40 uppercase tracking-[0.2em] mb-4">
+                      Immutable Proof on Arc Network
                     </div>
 
                     <button 
                       onClick={() => copyToClipboard(lastTxHash)}
-                      className="flex items-center gap-2 text-[10px] font-mono text-white/30 hover:text-white/60 transition-colors"
+                      className="flex items-center gap-2 text-[10px] font-mono text-white/20 hover:text-blue-400 transition-colors bg-white/5 px-3 py-1 rounded-lg border border-white/5"
                     >
-                      {lastTxHash.slice(0, 6)}...{lastTxHash.slice(-4)}
+                      TX: {lastTxHash.slice(0, 8)}...{lastTxHash.slice(-8)}
                       {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                     </button>
                   </div>
@@ -484,14 +571,15 @@ export function FlowBuilder() {
               <div className="flex gap-4 mt-6">
                 <button
                   onClick={downloadCard}
-                  className="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                  disabled={isGenerating}
+                  className="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
                 >
-                  <Download className="w-5 h-5" />
-                  Download
+                  {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  {isGenerating ? 'Generating...' : 'Download'}
                 </button>
                 <button
                   onClick={shareOnX}
-                  className="flex-1 bg-[#1DA1F2] hover:bg-[#1a91da] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                  className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20"
                 >
                   <Share2 className="w-5 h-5" />
                   Share on X

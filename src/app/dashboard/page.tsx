@@ -2,14 +2,20 @@
 
 import { Navbar } from "@/components/Navbar";
 import { useFlowStore } from "@/store/useFlowStore";
-import { Clock, ExternalLink, TrendingUp, Wallet, ArrowUpRight, User } from "lucide-react";
+import { Clock, ExternalLink, TrendingUp, Wallet, ArrowUpRight, User, CircleDollarSign } from "lucide-react";
 import { formatUnits } from "viem";
-import { useAccount } from "wagmi";
+import { useAccount, useBalance } from "wagmi";
 import Link from "next/link";
+import { USDC_ADDRESS } from "@/constants/contracts";
 
 export default function Dashboard() {
   const { address, isConnected } = useAccount();
   const { history, rules } = useFlowStore();
+
+  const { data: usdcBalance } = useBalance({
+    address,
+    token: USDC_ADDRESS as `0x${string}`,
+  });
 
   const totalVolume = history.reduce((sum, item) => sum + parseFloat(item.amount), 0);
 
@@ -21,33 +27,46 @@ export default function Dashboard() {
         <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <h1 className="text-4xl font-bold text-white mb-2">
-              Welcome, <span className="text-blue-500">{isConnected ? (address?.slice(0, 6) + '...' + address?.slice(-4)) : 'Guest Scholar'}</span>
+              Welcome, <span className="text-blue-500">{isConnected ? (address?.slice(0, 6) + '...' + address?.slice(-4)) : 'Explorer'}</span>
             </h1>
             <p className="text-white/40">Track your stablecoin automation performance</p>
           </div>
           {isConnected && (
             <div className="flex items-center gap-4">
-              <Link href="/" className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-500/20 transition-all">
+              <Link href="/split" className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-500/20 transition-all">
                 Create New Flow
               </Link>
               <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Personalized Workspace</span>
+                <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Active Workspace</span>
               </div>
             </div>
           )}
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="glass-card p-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+          <div className="glass-card p-6 border-blue-500/20 bg-blue-500/[0.02]">
             <div className="flex items-center gap-4 mb-4">
               <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <TrendingUp className="text-blue-500 w-5 h-5" />
+                <CircleDollarSign className="text-blue-500 w-5 h-5" />
               </div>
-              <span className="text-sm font-medium text-white/50">Total Volume Split</span>
+              <span className="text-sm font-medium text-white/50">USDC Balance</span>
             </div>
-            <p className="text-3xl font-mono font-bold">{totalVolume.toLocaleString()} <span className="text-sm font-sans text-blue-500">USDC</span></p>
+            <p className="text-3xl font-mono font-bold">
+              {usdcBalance ? parseFloat(formatUnits(usdcBalance.value, 6)).toLocaleString() : '0.00'} 
+              <span className="text-sm font-sans text-blue-500 ml-2">USDC</span>
+            </p>
+          </div>
+
+          <div className="glass-card p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <TrendingUp className="text-green-500 w-5 h-5" />
+              </div>
+              <span className="text-sm font-medium text-white/50">Total Volume</span>
+            </div>
+            <p className="text-3xl font-mono font-bold">{totalVolume.toLocaleString()} <span className="text-sm font-sans text-green-500">USDC</span></p>
           </div>
 
           <div className="glass-card p-6">
@@ -55,19 +74,19 @@ export default function Dashboard() {
               <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
                 <Clock className="text-purple-500 w-5 h-5" />
               </div>
-              <span className="text-sm font-medium text-white/50">Total Flows</span>
+              <span className="text-sm font-medium text-white/50">Flow History</span>
             </div>
             <p className="text-3xl font-mono font-bold">{history.length}</p>
           </div>
 
           <div className="glass-card p-6">
             <div className="flex items-center gap-4 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-                <Wallet className="text-green-500 w-5 h-5" />
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <Wallet className="text-blue-500 w-5 h-5" />
               </div>
               <span className="text-sm font-medium text-white/50">Active Rules</span>
             </div>
-            <p className="text-3xl font-mono font-bold">{rules.length}</p>
+            <p className="text-3xl font-mono font-bold">{rules?.length || 0}</p>
           </div>
         </div>
 
@@ -79,7 +98,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold flex items-center gap-2">
                   Transaction Activity
-                  <span className="text-xs bg-blue-500/10 px-2 py-1 rounded text-blue-400 font-mono">{history.length}</span>
+                  <span className="text-xs bg-blue-500/10 px-2 py-1 rounded text-blue-400 font-mono">{history?.length || 0}</span>
                 </h2>
                 <button className="text-xs font-bold text-white/20 hover:text-white transition-colors uppercase tracking-widest">View All</button>
               </div>
@@ -137,7 +156,7 @@ export default function Dashboard() {
             <div className="glass-card p-6 border-blue-500/10">
               <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-white/40 mb-6">Rule Library</h2>
               <div className="space-y-4">
-                {rules.length === 0 ? (
+                {!rules || rules.length === 0 ? (
                   <div className="p-8 text-center border-2 border-dashed border-white/5 rounded-2xl">
                     <p className="text-white/20 text-xs">No active rules.</p>
                   </div>

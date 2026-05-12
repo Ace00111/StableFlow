@@ -18,21 +18,26 @@ export function Navbar() {
             </Link>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
             <Link href="/" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
               Home
+            </Link>
+            <Link href="/split" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
+              Distribute
             </Link>
             <Link href="/dashboard" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
               Dashboard
             </Link>
-            <ConnectButton 
-              showBalance={false}
-              chainStatus="icon"
-              accountStatus={{
-                smallScreen: 'avatar',
-                largeScreen: 'full',
-              }}
-            />
+            <div className="ml-2">
+              <ConnectButton 
+                showBalance={false}
+                chainStatus="icon"
+                accountStatus={{
+                  smallScreen: 'avatar',
+                  largeScreen: 'full',
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
