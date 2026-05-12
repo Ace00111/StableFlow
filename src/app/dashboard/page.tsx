@@ -5,6 +5,7 @@ import { useFlowStore } from "@/store/useFlowStore";
 import { Clock, ExternalLink, TrendingUp, Wallet, ArrowUpRight, User } from "lucide-react";
 import { formatUnits } from "viem";
 import { useAccount } from "wagmi";
+import Link from "next/link";
 
 export default function Dashboard() {
   const { address, isConnected } = useAccount();
