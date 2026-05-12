@@ -26,7 +26,7 @@ export const arcTestnet = defineChain({
 
 export const config = getDefaultConfig({
   appName: 'StableFlow',
-  projectId: 'YOUR_PROJECT_ID', // Optional for now
+  projectId: process.env.NEXT_PUBLIC_WAGMI_PROJECT_ID || 'YOUR_PROJECT_ID',
   chains: [arcTestnet],
   transports: {
     [arcTestnet.id]: http(),

@@ -2,8 +2,11 @@ import { Navbar } from "@/components/Navbar";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { FlowBuilder } from "@/components/FlowBuilder";
 import { ArrowRight, Shield, Zap, Globe } from "lucide-react";
+import { useAccount } from "wagmi";
 
 export default function Home() {
+  const { isConnected } = useAccount();
+
   return (
     <main className="min-h-screen bg-mesh relative overflow-hidden">
       {/* Background decoration */}
@@ -14,36 +17,43 @@ export default function Home() {
       <NetworkBanner />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-32">
-        <div className="text-center mb-20 space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-            </span>
-            Arc Testnet Live
+        {!isConnected ? (
+          <div className="text-center mb-20 space-y-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+              Arc Testnet Live
+            </div>
+            <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white max-w-4xl mx-auto leading-[1.1]">
+              Automate your <span className="text-blue-500">Stablecoins</span> with precision
+            </h1>
+            <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
+              One payment in, multiple distributions out. The ultimate splitter for modern Web3 finance on Arc Network.
+            </p>
+            
+            <div className="flex flex-wrap justify-center gap-8 pt-8">
+              <div className="flex items-center gap-2 text-white/40 text-sm">
+                <Shield className="w-4 h-4 text-blue-500" />
+                Non-custodial
+              </div>
+              <div className="flex items-center gap-2 text-white/40 text-sm">
+                <Zap className="w-4 h-4 text-blue-500" />
+                Instant Split
+              </div>
+              <div className="flex items-center gap-2 text-white/40 text-sm">
+                <Globe className="w-4 h-4 text-blue-500" />
+                Circle USDC Native
+              </div>
+            </div>
           </div>
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white max-w-4xl mx-auto leading-[1.1]">
-            Automate your <span className="text-blue-500">Stablecoins</span> with precision
-          </h1>
-          <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
-            One payment in, multiple distributions out. The ultimate splitter for modern Web3 finance on Arc Network.
-          </p>
-          
-          <div className="flex flex-wrap justify-center gap-8 pt-8">
-            <div className="flex items-center gap-2 text-white/40 text-sm">
-              <Shield className="w-4 h-4 text-blue-500" />
-              Non-custodial
-            </div>
-            <div className="flex items-center gap-2 text-white/40 text-sm">
-              <Zap className="w-4 h-4 text-blue-500" />
-              Instant Split
-            </div>
-            <div className="flex items-center gap-2 text-white/40 text-sm">
-              <Globe className="w-4 h-4 text-blue-500" />
-              Circle USDC Native
-            </div>
+        ) : (
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-white">Create New Flow</h2>
+            <p className="text-white/40 mt-2">Automate your USDC distributions on Arc Network</p>
           </div>
-        </div>
+        )}
 
         <FlowBuilder />
 

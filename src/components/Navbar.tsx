@@ -19,6 +19,9 @@ export function Navbar() {
           </div>
           
           <div className="flex items-center gap-4">
+            <Link href="/" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
+              Home
+            </Link>
             <Link href="/dashboard" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
               Dashboard
             </Link>

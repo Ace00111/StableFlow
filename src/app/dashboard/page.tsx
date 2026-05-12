@@ -25,9 +25,14 @@ export default function Dashboard() {
             <p className="text-white/40">Track your stablecoin automation performance</p>
           </div>
           {isConnected && (
-            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Personalized Workspace</span>
+            <div className="flex items-center gap-4">
+              <Link href="/" className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-500/20 transition-all">
+                Create New Flow
+              </Link>
+              <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Personalized Workspace</span>
+              </div>
             </div>
           )}
         </div>
