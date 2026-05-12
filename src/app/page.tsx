@@ -1,3 +1,5 @@
+'use client';
+
 import { Navbar } from "@/components/Navbar";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { FlowBuilder } from "@/components/FlowBuilder";
