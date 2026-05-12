@@ -1,0 +1,506 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useAccount, useWriteContract, useConfig, useBalance } from 'wagmi';
+import { parseUnits, formatUnits, isAddress } from 'viem';
+import { waitForTransactionReceipt } from 'wagmi/actions';
+import { USDC_ADDRESS, USDC_ABI, SPLITTER_ADDRESS, SPLITTER_ABI } from '@/constants/contracts';
+import { useFlowStore, Allocation } from '@/store/useFlowStore';
+import { toPng } from 'html-to-image';
+import confetti from 'canvas-confetti';
+
+export function FlowBuilder() {
+  const { address, isConnected } = useAccount();
+  const [amount, setAmount] = useState('');
+  const [allocations, setAllocations] = useState<Allocation[]>([
+    { label: 'Savings', address: '', percentage: 50 },
+    { label: 'Spending', address: '', percentage: 50 },
+  ]);
+  const [txStep, setTxStep] = useState<'idle' | 'approving' | 'executing' | 'success'>('idle');
+  const [lastTxHash, setLastTxHash] = useState('');
+  const [showCard, setShowCard] = useState(false);
+  const [ruleName, setRuleName] = useState('');
+  const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  
+  const PRESETS = [
+    { name: 'Equal Split', allocations: [{ label: 'Wallet 1', address: '', percentage: 50 }, { label: 'Wallet 2', address: '', percentage: 50 }] },
+    { name: 'Golden Ratio', allocations: [{ label: 'Main', address: '', percentage: 62 }, { label: 'Side', address: '', percentage: 38 }] },
+    { name: 'Tithes (10%)', allocations: [{ label: 'Main', address: '', percentage: 90 }, { label: 'Giving', address: '', percentage: 10 }] },
+  ];
+  const [copied, setCopied] = useState(false);
+  
+  const config = useConfig();
+  const { writeContractAsync } = useWriteContract();
+  const { rules, addRule, addToHistory } = useFlowStore();
+  const { data: balance } = useBalance({
+    address,
+    token: USDC_ADDRESS as `0x${string}`,
+  });
+
+  const totalPercentage = allocations.reduce((sum, a) => sum + (Number(a.percentage) || 0), 0);
+  const allAddressesValid = allocations.every(a => isAddress(a.address));
+  const amountValid = amount && Number(amount) > 0;
+  const isValid = totalPercentage === 100 && allocations.length >= 2 && allAddressesValid && amountValid;
+
+  const handleAddAllocation = () => {
+    if (allocations.length >= 5) return;
+    setAllocations([...allocations, { label: `Wallet ${allocations.length + 1}`, address: '', percentage: 0 }]);
+  };
+
+  const handleRemoveAllocation = (index: number) => {
+    if (allocations.length <= 2) return;
+    setAllocations(allocations.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateAllocation = (index: number, field: keyof Allocation, value: string | number) => {
+    const newAllocations = [...allocations];
+    newAllocations[index] = { ...newAllocations[index], [field]: value };
+    setAllocations(newAllocations);
+    setSelectedRuleId(''); // Reset selection if edited
+  };
+
+  const handleSaveRule = () => {
+    if (!ruleName || totalPercentage !== 100) return;
+    addRule({
+      name: ruleName,
+      allocations: [...allocations],
+    });
+    setRuleName('');
+  };
+
+  const handleSelectRule = (id: string) => {
+    const rule = rules.find(r => r.id === id);
+    if (rule) {
+      setAllocations([...rule.allocations]);
+      setSelectedRuleId(id);
+    }
+  };
+
+  const handleExecute = async () => {
+    if (!isValid) return;
+    
+    try {
+      setTxStep('approving');
+      const amountBigInt = parseUnits(amount, 6);
+      
+      // Approval
+      const approveHash = await writeContractAsync({
+        address: USDC_ADDRESS as `0x${string}`,
+        abi: USDC_ABI,
+        functionName: 'approve',
+        args: [SPLITTER_ADDRESS as `0x${string}`, amountBigInt],
+      });
+
+      // Wait for approval
+      await waitForTransactionReceipt(config, {
+        hash: approveHash,
+      });
+
+      setTxStep('executing');
+      // Split
+      const recipients = allocations.map(a => a.address as `0x${string}`);
+      const basisPoints = allocations.map(a => BigInt(a.percentage * 100));
+      
+      const splitHash = await writeContractAsync({
+        address: SPLITTER_ADDRESS as `0x${string}`,
+        abi: SPLITTER_ABI,
+        functionName: 'executeSplit',
+        args: [USDC_ADDRESS as `0x${string}`, recipients, basisPoints, amountBigInt],
+      });
+
+      // Wait for split
+      await waitForTransactionReceipt(config, {
+        hash: splitHash,
+      });
+
+      setLastTxHash(splitHash);
+      setTxStep('success');
+      confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#3b82f6', '#ffffff', '#60a5fa']
+      });
+      
+      addToHistory({
+        amount,
+        ruleName: ruleName || 'Manual Flow',
+        txHash: splitHash,
+        allocations: [...allocations],
+      });
+
+      setShowCard(true);
+    } catch (error) {
+      console.error(error);
+      setTxStep('idle');
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadCard = () => {
+    const node = document.getElementById('viral-card');
+    if (node) {
+      toPng(node)
+        .then((dataUrl) => {
+          const link = document.createElement('a');
+          link.download = `stableflow-${Date.now()}.png`;
+          link.href = dataUrl;
+          link.click();
+        })
+        .catch((err) => console.error(err));
+    }
+  };
+
+  const shareOnX = () => {
+    const text = `I just automated my stablecoins with @StableFlow.\n${amount} USDC → split into ${allocations.length} wallets.\nBuilt on Arc Network. 🌊`;
+    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-8">
+      <div className="glass-card p-8">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Create Flow Rule</h2>
+            <p className="text-white/50 text-sm mt-1">Configure your USDC percentage distributions</p>
+          </div>
+          <div className="text-right">
+            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Your Balance</p>
+            <p className="text-xl font-mono text-blue-400">
+              {balance ? parseFloat(formatUnits(balance.value, 6)).toLocaleString() : '0.00'} <span className="text-sm font-sans">USDC</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Visual Allocation Bar */}
+        <div className="mb-10 space-y-2">
+          <div className="flex justify-between text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">
+            <span>Allocation Strategy</span>
+            <span className={totalPercentage === 100 ? 'text-blue-400' : 'text-red-400/60'}>
+              {totalPercentage}% / 100%
+            </span>
+          </div>
+          <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden flex shadow-inner">
+            {allocations.map((alloc, i) => (
+              <motion.div
+                key={i}
+                initial={{ width: 0 }}
+                animate={{ width: `${alloc.percentage}%` }}
+                className={`h-full border-r border-black/20 last:border-none`}
+                style={{ 
+                  backgroundColor: `hsl(${220 + (i * 25)}, 70%, ${50 - (i * 5)}%)`,
+                }}
+              />
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-4 mt-3">
+            {allocations.map((alloc, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, ${50 - (i * 5)}%)` }} />
+                <span className="text-[10px] font-medium text-white/40 uppercase tracking-wider">{alloc.label || `Wallet ${i+1}`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        { (rules.length > 0 || PRESETS.length > 0) && (
+          <div className="mb-8 space-y-4">
+            <div className="flex items-center gap-4">
+              <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Templates:</label>
+              <div className="flex flex-wrap gap-2">
+                {PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => {
+                      setAllocations([...preset.allocations]);
+                      setSelectedRuleId(preset.name);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      selectedRuleId === preset.name 
+                        ? 'bg-blue-600/20 border border-blue-500/40 text-blue-400' 
+                        : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {rules.length > 0 && (
+              <div className="flex items-center gap-4">
+                <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Your Rules:</label>
+                <div className="flex flex-wrap gap-2">
+                  {rules.map((rule) => (
+                    <button
+                      key={rule.id}
+                      onClick={() => handleSelectRule(rule.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        selectedRuleId === rule.id 
+                          ? 'bg-purple-600/20 border border-purple-500/40 text-purple-400' 
+                          : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {rule.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-[1fr_2fr_100px_40px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
+            <div>Label</div>
+            <div>Wallet Address</div>
+            <div>Percent</div>
+            <div></div>
+          </div>
+          
+          <AnimatePresence mode="popLayout">
+            {allocations.map((alloc, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="grid grid-cols-[1fr_2fr_100px_40px] gap-4 items-center bg-white/[0.02] p-2 rounded-xl border border-white/[0.05]"
+              >
+                <input
+                  type="text"
+                  value={alloc.label}
+                  onChange={(e) => handleUpdateAllocation(index, 'label', e.target.value)}
+                  placeholder="e.g. Savings"
+                  className="bg-transparent border-none focus:ring-0 text-sm text-white placeholder:text-white/20"
+                />
+                <input
+                  type="text"
+                  value={alloc.address}
+                  onChange={(e) => handleUpdateAllocation(index, 'address', e.target.value)}
+                  placeholder="0x..."
+                  className="bg-transparent border-none focus:ring-0 text-sm font-mono text-white/80 placeholder:text-white/20"
+                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={alloc.percentage}
+                    onChange={(e) => handleUpdateAllocation(index, 'percentage', parseInt(e.target.value) || 0)}
+                    className="w-full bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-sm text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 text-[10px]">%</span>
+                </div>
+                <button
+                  onClick={() => handleRemoveAllocation(index)}
+                  disabled={allocations.length <= 2}
+                  className="text-white/20 hover:text-red-400 transition-colors disabled:opacity-0"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          <button
+            onClick={handleAddAllocation}
+            disabled={allocations.length >= 5}
+            className="w-full py-3 border-2 border-dashed border-white/10 rounded-xl text-white/40 text-sm font-medium hover:border-white/20 hover:text-white/60 transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Wallet {allocations.length}/5
+          </button>
+
+          <div className="flex items-center gap-4 pt-4">
+            <input
+              type="text"
+              value={ruleName}
+              onChange={(e) => setRuleName(e.target.value)}
+              placeholder="Name this rule..."
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm text-white focus:border-blue-500 focus:ring-0 outline-none"
+            />
+            <button
+              onClick={handleSaveRule}
+              disabled={!ruleName || totalPercentage !== 100}
+              className="px-6 py-2 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-sm font-bold rounded-xl border border-blue-500/20 transition-all"
+            >
+              Save Rule
+            </button>
+            <button
+              onClick={() => alert('Rules synced with Shelby Protocol.')}
+              className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white/50 text-sm font-bold rounded-xl transition-all"
+            >
+              Sign & Sync
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-8 pt-8 border-t border-white/5 flex flex-col sm:flex-row gap-6 items-end">
+          <div className="flex-1 space-y-2 w-full">
+            <label className="text-xs font-bold text-white/30 uppercase tracking-widest px-1">Total Amount (USDC)</label>
+            <div className="relative">
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 text-2xl font-mono text-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
+              />
+              <div className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 font-bold">USDC</div>
+            </div>
+          </div>
+          
+          <div className="w-full sm:w-auto">
+            {!isConnected ? (
+              <div className="w-full sm:w-[200px]">
+                <ConnectButton.Custom>
+                  {({ openConnectModal }) => (
+                    <button
+                      onClick={openConnectModal}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-2xl shadow-xl shadow-blue-500/20 transition-all flex items-center justify-center gap-3"
+                    >
+                      Connect Wallet
+                    </button>
+                  )}
+                </ConnectButton.Custom>
+              </div>
+            ) : (
+              <>
+                <div className="mb-2 text-right">
+                  {!amountValid ? (
+                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Enter Amount</span>
+                  ) : totalPercentage !== 100 ? (
+                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Sum must be 100%</span>
+                  ) : !allAddressesValid ? (
+                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Invalid Addresses</span>
+                  ) : (
+                    <span className="text-[10px] text-green-400/60 font-bold uppercase tracking-wider">Ready to Split</span>
+                  )}
+                </div>
+                <button
+                  onClick={handleExecute}
+                  disabled={!isValid || txStep !== 'idle'}
+                  className="w-full sm:w-[200px] bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:text-white/20 text-white font-bold py-4 rounded-2xl shadow-xl shadow-blue-500/20 transition-all flex items-center justify-center gap-3 overflow-hidden group"
+                >
+                  {txStep === 'idle' ? (
+                    <>
+                      <span>Execute Flow</span>
+                      <Send className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>{txStep === 'approving' ? 'Approving...' : 'Executing...'}</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Success Modal / Viral Card */}
+      <AnimatePresence>
+        {showCard && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative max-w-md w-full"
+            >
+              <button 
+                onClick={() => setShowCard(false)}
+                className="absolute -top-12 right-0 text-white/50 hover:text-white transition-colors"
+              >
+                <X className="w-8 h-8" />
+              </button>
+
+              <div id="viral-card" className="bg-gradient-to-br from-[#050505] to-[#121212] p-8 rounded-[32px] border border-white/10 shadow-2xl relative overflow-hidden">
+                {/* Decoration */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-3xl rounded-full" />
+                <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/5 blur-3xl rounded-full" />
+                
+                <div className="relative z-10 flex flex-col items-center text-center">
+                  <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/20">
+                    <CheckCircle2 className="w-10 h-10 text-white" />
+                  </div>
+                  
+                  <h3 className="text-2xl font-bold text-white mb-2">Flow Executed</h3>
+                  <p className="text-white/40 text-sm mb-8">StableFlow Execution Complete</p>
+                  
+                  <div className="w-full bg-white/[0.03] rounded-2xl p-6 border border-white/[0.05] mb-8">
+                    <p className="text-xs font-bold text-white/30 uppercase tracking-[0.2em] mb-4">Total Processed</p>
+                    <p className="text-4xl font-mono font-bold text-white mb-6">
+                      {parseFloat(amount).toLocaleString()} <span className="text-lg font-sans text-blue-500">USDC</span>
+                    </p>
+                    
+                    <div className="space-y-3">
+                      {allocations.map((a, i) => (
+                        <div key={i} className="flex justify-between items-center text-sm">
+                          <span className="text-white/60">{a.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-mono">{a.percentage}%</span>
+                            <div className="w-12 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <div className="h-full bg-blue-500" style={{ width: `${a.percentage}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col items-center gap-4 w-full">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-white/20 uppercase tracking-[0.3em]">
+                      <div className="w-8 h-[1px] bg-white/10" />
+                      Powered by Arc Network
+                      <div className="w-8 h-[1px] bg-white/10" />
+                    </div>
+
+                    <button 
+                      onClick={() => copyToClipboard(lastTxHash)}
+                      className="flex items-center gap-2 text-[10px] font-mono text-white/30 hover:text-white/60 transition-colors"
+                    >
+                      {lastTxHash.slice(0, 6)}...{lastTxHash.slice(-4)}
+                      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={downloadCard}
+                  className="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                >
+                  <Download className="w-5 h-5" />
+                  Download
+                </button>
+                <button
+                  onClick={shareOnX}
+                  className="flex-1 bg-[#1DA1F2] hover:bg-[#1a91da] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                >
+                  <Share2 className="w-5 h-5" />
+                  Share on X
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
