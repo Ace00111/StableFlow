@@ -110,28 +110,28 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   history.map((item) => (
-                    <div key={item.id} className="glass-card p-6 flex items-center justify-between group hover:border-white/20 transition-all">
-                      <div className="flex items-center gap-5">
-                        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-all shadow-lg shadow-blue-500/5">
-                          <ArrowUpRight className="w-6 h-6" />
+                    <div key={item.id} className="glass-card p-4 md:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:border-white/20 transition-all">
+                      <div className="flex items-center gap-4 md:gap-5">
+                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-all shadow-lg shadow-blue-500/5 flex-shrink-0">
+                          <ArrowUpRight className="w-5 h-5 md:w-6 md:h-6" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <p className="font-bold text-lg">{item.amount} USDC</p>
-                            <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-white/40 uppercase font-bold tracking-tighter">Success</span>
+                            <p className="font-bold text-base md:text-lg">{item.amount} USDC</p>
+                            <span className="text-[9px] md:text-[10px] bg-white/5 px-2 py-0.5 rounded text-white/40 uppercase font-bold tracking-tighter">Success</span>
                           </div>
-                          <p className="text-xs text-white/30 font-mono">{new Date(item.timestamp).toLocaleString()}</p>
+                          <p className="text-[10px] md:text-xs text-white/30 font-mono">{new Date(item.timestamp).toLocaleString()}</p>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-8">
-                        <div className="hidden sm:flex flex-col items-end">
-                          <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-2">Allocations</p>
-                          <div className="flex -space-x-1.5">
+                      <div className="flex items-center justify-between w-full sm:w-auto gap-8">
+                        <div className="flex flex-col items-start sm:items-end">
+                          <p className="text-[9px] md:text-[10px] font-bold text-white/20 uppercase tracking-widest mb-1.5 md:mb-2">Allocations</p>
+                          <div className="flex -space-x-1 md:-space-x-1.5">
                             {item.allocations.map((_, i) => (
-                              <div key={i} className="w-6 h-6 rounded-lg bg-blue-500/20 border border-black/50 flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, 40%)` }}>
+                              <div key={i} className="w-5 h-5 md:w-6 md:h-6 rounded-lg bg-blue-500/20 border border-black/50 flex items-center justify-center text-[9px] md:text-[10px] font-bold" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, 40%)` }}>
                                 {i + 1}
-                              </div>
+                               </div>
                             ))}
                           </div>
                         </div>

@@ -29,7 +29,7 @@ export default function Home() {
               </span>
               Arc Testnet Live
             </div>
-            <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white max-w-4xl mx-auto leading-[1.1]">
+            <h1 className="text-4xl md:text-7xl font-bold tracking-tight text-white max-w-4xl mx-auto leading-[1.1]">
               Automate your <span className="text-blue-500">Stablecoins</span> with precision
             </h1>
             <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto">

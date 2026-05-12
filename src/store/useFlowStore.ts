@@ -43,6 +43,7 @@ interface FlowStore {
 export const useFlowStore = create<FlowStore>()(
   persist(
     (set) => ({
+      rules: [],
       history: [],
       savedAddresses: [],
       addRule: (rule) => set((state) => ({

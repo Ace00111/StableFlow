@@ -319,7 +319,7 @@ export function FlowBuilder() {
         )}
 
         <div className="space-y-4">
-          <div className="grid grid-cols-[1fr_2fr_100px_80px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
+          <div className="hidden md:grid grid-cols-[1fr_2fr_100px_80px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
             <div>Label</div>
             <div>Wallet Address</div>
             <div>Percent</div>
@@ -333,32 +333,63 @@ export function FlowBuilder() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="grid grid-cols-[1fr_2fr_100px_80px] gap-4 items-center bg-white/[0.02] p-2 rounded-xl border border-white/[0.05]"
+                className="flex flex-col md:grid md:grid-cols-[1fr_2fr_100px_80px] gap-4 items-center bg-white/[0.02] p-4 md:p-2 rounded-xl border border-white/[0.05]"
               >
-                <input
-                  type="text"
-                  value={alloc.label}
-                  onChange={(e) => handleUpdateAllocation(index, 'label', e.target.value)}
-                  placeholder="e.g. Savings"
-                  className="bg-transparent border-none focus:ring-0 text-sm text-white placeholder:text-white/20"
-                />
-                <input
-                  type="text"
-                  value={alloc.address}
-                  onChange={(e) => handleUpdateAllocation(index, 'address', e.target.value)}
-                  placeholder="0x..."
-                  className="bg-transparent border-none focus:ring-0 text-sm font-mono text-white/80 placeholder:text-white/20"
-                />
-                <div className="relative">
+                <div className="w-full md:w-auto">
+                  <label className="text-[10px] font-bold text-white/20 uppercase mb-1 block md:hidden">Label</label>
                   <input
-                    type="number"
-                    value={alloc.percentage}
-                    onChange={(e) => handleUpdateAllocation(index, 'percentage', parseInt(e.target.value) || 0)}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-sm text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                    type="text"
+                    value={alloc.label}
+                    onChange={(e) => handleUpdateAllocation(index, 'label', e.target.value)}
+                    placeholder="e.g. Savings"
+                    className="w-full bg-transparent border-none focus:ring-0 text-sm text-white placeholder:text-white/20 p-0"
                   />
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 text-[10px]">%</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="w-full md:w-auto">
+                  <label className="text-[10px] font-bold text-white/20 uppercase mb-1 block md:hidden">Wallet Address</label>
+                  <input
+                    type="text"
+                    value={alloc.address}
+                    onChange={(e) => handleUpdateAllocation(index, 'address', e.target.value)}
+                    placeholder="0x..."
+                    className="w-full bg-transparent border-none focus:ring-0 text-sm font-mono text-white/80 placeholder:text-white/20 p-0"
+                  />
+                </div>
+                <div className="w-full md:w-auto flex items-center gap-4">
+                  <div className="flex-1 md:w-full">
+                    <label className="text-[10px] font-bold text-white/20 uppercase mb-1 block md:hidden">Percent</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        value={alloc.percentage}
+                        onChange={(e) => handleUpdateAllocation(index, 'percentage', parseInt(e.target.value) || 0)}
+                        className="w-full bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-sm text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 text-[10px]">%</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 md:hidden">
+                    <button
+                      onClick={() => {
+                        if (alloc.address && isAddress(alloc.address)) {
+                          addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                        }
+                      }}
+                      disabled={!isAddress(alloc.address)}
+                      className="text-white/20 hover:text-blue-400 transition-colors disabled:opacity-30 p-2 bg-white/5 rounded-lg"
+                    >
+                      <Bookmark className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleRemoveAllocation(index)}
+                      disabled={allocations.length <= 2}
+                      className="text-white/20 hover:text-red-400 transition-colors disabled:opacity-0 p-2 bg-white/5 rounded-lg"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="hidden md:flex items-center gap-1">
                   <button
                     onClick={() => {
                       if (alloc.address && isAddress(alloc.address)) {
