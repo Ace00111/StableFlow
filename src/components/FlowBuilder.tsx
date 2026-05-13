@@ -19,7 +19,7 @@ export function FlowBuilder() {
     { label: 'Savings', address: '', percentage: 50 },
     { label: 'Spending', address: '', percentage: 50 },
   ]);
-  const [txStep, setTxStep] = useState<'idle' | 'approving' | 'executing' | 'success'>('idle');
+  const [txStep, setTxStep] = useState<'idle' | 'executing' | 'success'>('idle');
   const [lastTxHash, setLastTxHash] = useState('');
   const [showCard, setShowCard] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -39,7 +39,6 @@ export function FlowBuilder() {
   const [copied, setCopied] = useState(false);
   
   const config = useConfig();
-  const { writeContractAsync } = useWriteContract();
   const { rules, addRule, addToHistory, savedAddresses, addAddress, removeAddress } = useFlowStore();
   const [showAddressBook, setShowAddressBook] = useState(false);
   const { data: balance, refetch: refetchBalance } = useBalance({
@@ -49,12 +48,8 @@ export function FlowBuilder() {
   const totalPercentage = allocations.reduce((sum, a) => sum + (Number(a.percentage) || 0), 0);
   const allAddressesValid = allocations.every(a => isAddress(a.address));
   
-  // Use dynamic decimals from balance hook (Arc USDC is 18)
-  const usdcDecimals = balance?.decimals || 18;
-  const amountBigInt = amount ? parseUnits(amount, usdcDecimals) : 0n;
+  const usdcDecimals = 18;
   const amountValid = !!amount && parseFloat(amount) > 0;
-  const gasBuffer = parseUnits('0.1', usdcDecimals);
-  const isInsufficientBalance = balance ? balance.value < (amountBigInt + gasBuffer) : false;
   
   // Ensure every row with a percentage has an address
   const allRowsComplete = allocations.every(a => 
@@ -65,7 +60,6 @@ export function FlowBuilder() {
                   allocations.length >= 2 && 
                   allAddressesValid && 
                   amountValid && 
-                  !isInsufficientBalance &&
                   allRowsComplete;
 
   const handleAddAllocation = () => {
@@ -103,84 +97,42 @@ export function FlowBuilder() {
   };
 
   const handleExecute = async () => {
-    if (!isValid || !address) return;
-    const usdcDecimals = balance?.decimals || 18;
-    const amountBigInt = parseUnits(amount, usdcDecimals);
+    if (!amountValid || !address) return;
 
     try {
-      setTxStep('approving');
-
-      // 1. Pre-execution balance check (use native balance since USDC is the gas token)
-      const senderBalance = balance?.value ?? 0n;
-
-      if (senderBalance < amountBigInt) {
-        throw new Error('Insufficient USDC balance');
-      }
-
-      // 2. Allowance check and Approval (SKIP for native USDC)
-      const isNativeUSDC = USDC_ADDRESS.toLowerCase() === '0x3600000000000000000000000000000000000000'.toLowerCase();
-      
-      if (!isNativeUSDC) {
-        const currentAllowance = await readContract(config, {
-          address: USDC_ADDRESS,
-          abi: USDC_ABI,
-          functionName: 'allowance',
-          args: [address as `0x${string}`, SPLITTER_ADDRESS],
-        }) as bigint;
-
-        console.log('USDC Allowance:', formatUnits(currentAllowance, usdcDecimals));
-
-        if (currentAllowance < amountBigInt) {
-          const approveHash = await writeContractAsync({
-            address: USDC_ADDRESS,
-            abi: USDC_ABI,
-            functionName: 'approve',
-            args: [SPLITTER_ADDRESS, amountBigInt],
-          });
-          await waitForTransactionReceipt(config, { hash: approveHash });
-        }
-      } else {
-        console.log('Native USDC detected — skipping approval step.');
-      }
-
       setTxStep('executing');
 
-      // 3. Prepare recipients and basis points
+      // Prepare recipients and basis points
       const validAllocs = allocations.filter((a) => isAddress(a.address));
       const recipients = validAllocs.map((a) => a.address as `0x${string}`);
       
-      // Calculate basis points (100% = 10000). The contract expects values that sum to 10000.
       const roundedBps = validAllocs.map((a) => Math.round(a.percentage * 100));
       const totalBps = roundedBps.reduce((s, v) => s + v, 0);
       
-      // Handle rounding error by adjusting the largest share or last recipient
       if (totalBps !== 10000) {
         roundedBps[roundedBps.length - 1] += (10000 - totalBps);
       }
       
-      const basisPoints = roundedBps.map((b) => BigInt(b));
-
-      console.log('--- Debug Transaction Info ---');
-      console.log('User Address:', address);
-      console.log('Splitter Address:', SPLITTER_ADDRESS);
-      console.log('Is Native USDC:', isNativeUSDC);
-      console.log('USDC Decimals:', usdcDecimals);
-      console.log('USDC Balance:', formatUnits(senderBalance, usdcDecimals));
-      console.log('Target Amount (Units):', amountBigInt.toString());
-      console.log('Target Amount (Human):', amount);
-      console.log('Recipients:', recipients);
-      console.log('Basis Points:', basisPoints.map(b => b.toString()));
-      console.log('------------------------------');
-      
-      const splitHash = await writeContractAsync({
-        address: SPLITTER_ADDRESS,
-        abi: SPLITTER_ABI,
-        functionName: 'executeSplit',
-        args: [USDC_ADDRESS, recipients, basisPoints, amountBigInt],
-        value: isNativeUSDC ? amountBigInt : 0n, // Send USDC as value if native
+      // Execute via Relayer API (Sponsored by Private Key in .env.local)
+      const response = await fetch('/api/flow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipients,
+          basisPoints: roundedBps,
+          amount
+        })
       });
 
-      console.log('Transaction Hash:', splitHash);
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Relayer execution failed');
+      }
+
+      const splitHash = result.hash;
+      console.log('Transaction Hash (Relayed):', splitHash);
+      
       const receipt = await waitForTransactionReceipt(config, { hash: splitHash });
       console.log('Transaction Receipt:', receipt);
 
@@ -208,7 +160,7 @@ export function FlowBuilder() {
     } catch (error: any) {
       console.error('Flow Execution Error:', error);
       const errMsg = error?.shortMessage || error?.message || 'Transaction failed';
-      alert(errMsg); // Basic alert for now, could be a toast
+      alert(errMsg); 
       setTxStep('idle');
     }
   };
@@ -259,7 +211,7 @@ export function FlowBuilder() {
             <p className="text-white/50 text-sm mt-1">Configure your USDC percentage distributions</p>
           </div>
           <div className="text-right">
-            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Your Balance</p>
+            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Your Wallet</p>
             <p className="text-xl font-mono text-blue-400">
               {balance ? parseFloat(formatUnits(balance.value, balance.decimals)).toLocaleString() : '0.00'} <span className="text-sm font-sans">USDC</span>
             </p>
@@ -525,29 +477,12 @@ export function FlowBuilder() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className={`w-full bg-white/[0.03] border ${isInsufficientBalance ? 'border-red-500/50' : 'border-white/10'} rounded-2xl py-4 px-6 text-2xl font-mono text-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none`}
+                className={`w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 text-2xl font-mono text-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none`}
               />
               <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-3">
-                <button
-                  onClick={() => {
-                    if (balance) {
-                      const buffer = parseUnits('0.1', balance.decimals);
-                      const maxAmount = balance.value > buffer ? balance.value - buffer : 0n;
-                      setAmount(formatUnits(maxAmount, balance.decimals));
-                    }
-                  }}
-                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 px-2 py-1 rounded uppercase tracking-wider transition-colors"
-                >
-                  Max
-                </button>
                 <div className="text-white/20 font-bold">USDC</div>
               </div>
             </div>
-            {isInsufficientBalance && (
-              <p className="text-[10px] text-red-400 font-bold uppercase tracking-wider px-2 mt-1">
-                Insufficient balance (Available: {balance ? formatUnits(balance.value, balance.decimals) : '0'})
-              </p>
-            )}
           </div>
           
           <div className="w-full sm:w-auto">
@@ -566,20 +501,9 @@ export function FlowBuilder() {
               </div>
             ) : (
               <>
-                <div className="mb-2 text-right">
-                  {!amountValid ? (
-                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Enter Amount</span>
-                  ) : isInsufficientBalance ? (
-                    <span className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Insufficient USDC</span>
-                  ) : totalPercentage !== 100 ? (
-                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Sum must be 100%</span>
-                  ) : !allAddressesValid ? (
-                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Invalid Addresses</span>
-                  ) : !allRowsComplete ? (
-                    <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Missing Addresses</span>
-                  ) : (
-                    <span className="text-[10px] text-green-400/60 font-bold uppercase tracking-wider">Ready to Flow</span>
-                  )}
+                <div className="mb-2 text-right flex items-center justify-end gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-[10px] text-green-400/60 font-bold uppercase tracking-wider">Gas Sponsored</span>
                 </div>
                 <button
                   onClick={handleExecute}
@@ -595,12 +519,12 @@ export function FlowBuilder() {
                     <div className="flex flex-col items-center gap-1">
                       <div className="flex items-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">{txStep === 'approving' ? 'Step 1: Approving' : 'Step 2: Executing'}</span>
+                        <span className="text-sm">Relaying Flow...</span>
                       </div>
                       <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
                         <motion.div 
                           initial={{ width: 0 }}
-                          animate={{ width: txStep === 'approving' ? '50%' : '100%' }}
+                          animate={{ width: '100%' }}
                           className="h-full bg-blue-500"
                         />
                       </div>
