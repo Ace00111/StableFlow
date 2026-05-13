@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, Check, Bookmark, Book, Waves } from 'lucide-react';
+import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, Check, Bookmark, Book, Waves, Edit3, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount, useWriteContract, useConfig, useBalance } from 'wagmi';
 import { parseUnits, formatUnits, isAddress } from 'viem';
@@ -24,24 +24,27 @@ export function FlowBuilder() {
   const [showCard, setShowCard] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [ruleName, setRuleName] = useState('');
-  const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  const [selectedId, setSelectedId] = useState<string>('');
+  const [editMode, setEditMode] = useState<'rule' | 'template' | 'none'>('none');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
   
-  const PRESETS = [
-    { name: 'Equal Split', allocations: [{ label: 'Wallet 1', address: '', percentage: 50 }, { label: 'Wallet 2', address: '', percentage: 50 }] },
-    { name: 'Golden Ratio', allocations: [{ label: 'Main', address: '', percentage: 62 }, { label: 'Side', address: '', percentage: 38 }] },
-    { name: 'Tithes (10%)', allocations: [{ label: 'Main', address: '', percentage: 90 }, { label: 'Giving', address: '', percentage: 10 }] },
-  ];
   const [copied, setCopied] = useState(false);
   
   const config = useConfig();
   const { writeContractAsync } = useWriteContract();
-  const { rules, addRule, addToHistory, savedAddresses, addAddress, removeAddress } = useFlowStore();
+  const { 
+    rules, addRule, updateRule, removeRule,
+    templates, addTemplate, updateTemplate, removeTemplate,
+    history, addToHistory, 
+    savedAddresses, addAddress, updateAddress, removeAddress 
+  } = useFlowStore();
   const [showAddressBook, setShowAddressBook] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  
   const { data: balance, refetch: refetchBalance } = useBalance({
     address,
   });
@@ -49,14 +52,12 @@ export function FlowBuilder() {
   const totalPercentage = allocations.reduce((sum, a) => sum + (Number(a.percentage) || 0), 0);
   const allAddressesValid = allocations.every(a => isAddress(a.address));
   
-  // Use dynamic decimals from balance hook (Arc USDC is 18)
   const usdcDecimals = balance?.decimals || 18;
   const amountBigInt = amount ? parseUnits(amount, usdcDecimals) : BigInt(0);
   const amountValid = !!amount && parseFloat(amount) > 0;
   const gasBuffer = parseUnits('0.1', usdcDecimals);
   const isInsufficientBalance = balance ? balance.value < (amountBigInt + gasBuffer) : false;
   
-  // Ensure every row with a percentage has an address
   const allRowsComplete = allocations.every(a => 
     (a.percentage > 0 && isAddress(a.address)) || (a.percentage === 0 && !a.address) || (a.percentage === 0 && isAddress(a.address))
   );
@@ -82,23 +83,58 @@ export function FlowBuilder() {
     const newAllocations = [...allocations];
     newAllocations[index] = { ...newAllocations[index], [field]: value };
     setAllocations(newAllocations);
-    setSelectedRuleId(''); // Reset selection if edited
+    setSelectedId(''); 
+    setEditMode('none');
   };
 
   const handleSaveRule = () => {
     if (!ruleName || totalPercentage !== 100) return;
-    addRule({
-      name: ruleName,
-      allocations: [...allocations],
-    });
+    
+    if (editMode === 'rule' && selectedId) {
+      updateRule(selectedId, { name: ruleName, allocations: [...allocations] });
+    } else {
+      addRule({
+        name: ruleName,
+        allocations: [...allocations],
+      });
+    }
     setRuleName('');
+    setEditMode('none');
+    setSelectedId('');
+  };
+
+  const handleSaveTemplate = () => {
+    if (!ruleName || totalPercentage !== 100) return;
+    if (editMode === 'template' && selectedId) {
+      updateTemplate(selectedId, { name: ruleName, allocations: [...allocations] });
+    } else {
+      addTemplate({
+        name: ruleName,
+        allocations: [...allocations],
+      });
+    }
+    setRuleName('');
+    setEditMode('none');
+    setSelectedId('');
   };
 
   const handleSelectRule = (id: string) => {
     const rule = rules?.find(r => r.id === id);
     if (rule) {
       setAllocations([...rule.allocations]);
-      setSelectedRuleId(id);
+      setSelectedId(id);
+      setRuleName(rule.name);
+      setEditMode('rule');
+    }
+  };
+
+  const handleSelectTemplate = (id: string) => {
+    const template = templates?.find(t => t.id === id);
+    if (template) {
+      setAllocations([...template.allocations]);
+      setSelectedId(id);
+      setRuleName(template.name);
+      setEditMode('template');
     }
   };
 
@@ -110,14 +146,11 @@ export function FlowBuilder() {
     try {
       setTxStep('approving');
 
-      // 1. Pre-execution balance check (use native balance since USDC is the gas token)
       const senderBalance = balance?.value ?? BigInt(0);
-
       if (senderBalance < amountBigInt) {
         throw new Error('Insufficient USDC balance');
       }
 
-      // 2. Allowance check and Approval (SKIP for native USDC)
       const isNativeUSDC = USDC_ADDRESS.toLowerCase() === '0x3600000000000000000000000000000000000000'.toLowerCase();
       
       if (!isNativeUSDC) {
@@ -128,8 +161,6 @@ export function FlowBuilder() {
           args: [address as `0x${string}`, SPLITTER_ADDRESS],
         }) as bigint;
 
-        console.log('USDC Allowance:', formatUnits(currentAllowance, usdcDecimals));
-
         if (currentAllowance < amountBigInt) {
           const approveHash = await writeContractAsync({
             address: USDC_ADDRESS,
@@ -139,51 +170,29 @@ export function FlowBuilder() {
           });
           await waitForTransactionReceipt(config, { hash: approveHash });
         }
-      } else {
-        console.log('Native USDC detected — skipping approval step.');
       }
 
       setTxStep('executing');
 
-      // 3. Prepare recipients and basis points
       const validAllocs = allocations.filter((a) => isAddress(a.address));
       const recipients = validAllocs.map((a) => a.address as `0x${string}`);
-      
-      // Calculate basis points (100% = 10000). The contract expects values that sum to 10000.
       const roundedBps = validAllocs.map((a) => Math.round(a.percentage * 100));
       const totalBps = roundedBps.reduce((s, v) => s + v, 0);
       
-      // Handle rounding error by adjusting the largest share or last recipient
       if (totalBps !== 10000) {
         roundedBps[roundedBps.length - 1] += (10000 - totalBps);
       }
-      
       const basisPoints = roundedBps.map((b) => BigInt(b));
 
-      console.log('--- Debug Transaction Info ---');
-      console.log('User Address:', address);
-      console.log('Splitter Address:', SPLITTER_ADDRESS);
-      console.log('Is Native USDC:', isNativeUSDC);
-      console.log('USDC Decimals:', usdcDecimals);
-      console.log('USDC Balance:', formatUnits(senderBalance, usdcDecimals));
-      console.log('Target Amount (Units):', amountBigInt.toString());
-      console.log('Target Amount (Human):', amount);
-      console.log('Recipients:', recipients);
-      console.log('Basis Points:', basisPoints.map(b => b.toString()));
-      console.log('------------------------------');
-      
       const splitHash = await writeContractAsync({
         address: SPLITTER_ADDRESS,
         abi: SPLITTER_ABI,
         functionName: 'executeSplit',
         args: [USDC_ADDRESS, recipients, basisPoints, amountBigInt],
-        value: isNativeUSDC ? amountBigInt : BigInt(0), // Send USDC as value if native
+        value: isNativeUSDC ? amountBigInt : BigInt(0),
       });
 
-      console.log('Transaction Hash:', splitHash);
       const receipt = await waitForTransactionReceipt(config, { hash: splitHash });
-      console.log('Transaction Receipt:', receipt);
-
       setLastTxHash(splitHash);
       setTxStep('success');
       
@@ -197,7 +206,7 @@ export function FlowBuilder() {
       void refetchBalance();
       setShowCard(true);
       setTxStep('idle');
-      setRuleName('');
+      
       confetti({
         particleCount: 150,
         spread: 70,
@@ -208,7 +217,7 @@ export function FlowBuilder() {
     } catch (error: any) {
       console.error('Flow Execution Error:', error);
       const errMsg = error?.shortMessage || error?.message || 'Transaction failed';
-      alert(errMsg); // Basic alert for now, could be a toast
+      alert(errMsg);
       setTxStep('idle');
     }
   };
@@ -224,7 +233,6 @@ export function FlowBuilder() {
     if (node) {
       setIsGenerating(true);
       try {
-        // Wait a bit for fonts to render
         await new Promise(r => setTimeout(r, 500));
         const dataUrl = await toPng(node, { 
           cacheBust: true,
@@ -297,51 +305,71 @@ export function FlowBuilder() {
           </div>
         </div>
 
-        { (rules?.length > 0 || PRESETS.length > 0) && (
-          <div className="mb-8 space-y-4">
-            <div className="flex items-center gap-4">
-              <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Templates:</label>
-              <div className="flex flex-wrap gap-2">
-                {PRESETS.map((preset) => (
+        <div className="mb-8 space-y-4">
+          {/* Templates */}
+          <div className="flex items-start gap-4">
+            <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap mt-2">Templates:</label>
+            <div className="flex flex-wrap gap-2">
+              {templates?.map((template) => (
+                <div key={template.id} className="group relative">
                   <button
-                    key={preset.name}
-                    onClick={() => {
-                      setAllocations([...preset.allocations]);
-                      setSelectedRuleId(preset.name);
-                    }}
+                    onClick={() => handleSelectTemplate(template.id)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      selectedRuleId === preset.name 
+                      selectedId === template.id && editMode === 'template'
                         ? 'bg-blue-600/20 border border-blue-500/40 text-blue-400' 
-                        : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                        : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-transparent'
                     }`}
                   >
-                    {preset.name}
+                    {template.name}
                   </button>
-                ))}
-              </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); removeTemplate(template.id); }}
+                    className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-[8px]"
+                  >
+                    <X className="w-2 h-2" />
+                  </button>
+                </div>
+              ))}
+              <button 
+                onClick={() => { setEditMode('template'); setRuleName('New Template'); }}
+                className="px-2 py-1.5 rounded-lg bg-white/5 text-white/30 hover:text-white border border-dashed border-white/10"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
             </div>
+          </div>
 
-            {rules?.length > 0 && (
-              <div className="flex items-center gap-4">
-                <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Your Rules:</label>
-                <div className="flex flex-wrap gap-2">
-                  {rules.map((rule) => (
+          {/* Rules */}
+          {rules?.length > 0 && (
+            <div className="flex items-start gap-4">
+              <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap mt-2">Your Rules:</label>
+              <div className="flex flex-wrap gap-2">
+                {rules.map((rule) => (
+                  <div key={rule.id} className="group relative">
                     <button
-                      key={rule.id}
                       onClick={() => handleSelectRule(rule.id)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        selectedRuleId === rule.id 
+                        selectedId === rule.id && editMode === 'rule'
                           ? 'bg-purple-600/20 border border-purple-500/40 text-purple-400' 
-                          : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                          : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-transparent'
                       }`}
                     >
                       {rule.name}
                     </button>
-                  ))}
-                </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); removeRule(rule.id); }}
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-[8px]"
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
+          {/* Address Book */}
+          <div className="flex flex-col gap-2">
             <div className="flex items-center gap-4">
               <label className="text-xs font-bold text-white/30 uppercase tracking-widest whitespace-nowrap">Address Book:</label>
               <button
@@ -351,32 +379,61 @@ export function FlowBuilder() {
                 <Book className="w-3 h-3" />
                 {savedAddresses?.length || 0} Saved
               </button>
-              
-              {showAddressBook && savedAddresses?.length > 0 && (
-                <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                  {savedAddresses.map((addr) => (
-                    <button
-                      key={addr.id}
-                      onClick={() => {
-                        // Find first empty address or add new
-                        const emptyIndex = allocations.findIndex(a => !a.address);
-                        if (emptyIndex !== -1) {
-                          handleUpdateAllocation(emptyIndex, 'address', addr.address);
-                          handleUpdateAllocation(emptyIndex, 'label', addr.label);
-                        } else if (allocations.length < 5) {
-                          setAllocations([...allocations, { label: addr.label, address: addr.address, percentage: 0 }]);
-                        }
-                      }}
-                      className="px-2 py-1 rounded bg-white/5 text-[10px] text-white/60 hover:bg-white/10 hover:text-white border border-white/5 transition-all"
-                    >
-                      {addr.label}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
+            
+            <AnimatePresence>
+              {showAddressBook && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-wrap gap-2 p-3 bg-white/5 rounded-xl border border-white/10">
+                    {savedAddresses.map((addr) => (
+                      <div key={addr.id} className="group relative flex items-center gap-1 bg-black/40 px-2 py-1 rounded border border-white/5">
+                        {editingAddressId === addr.id ? (
+                          <input 
+                            autoFocus
+                            className="bg-transparent border-none focus:ring-0 text-[10px] text-white w-20 p-0"
+                            value={addr.label}
+                            onChange={(e) => updateAddress(addr.id, { label: e.target.value })}
+                            onBlur={() => setEditingAddressId(null)}
+                            onKeyDown={(e) => e.key === 'Enter' && setEditingAddressId(null)}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => {
+                              const emptyIndex = allocations.findIndex(a => !a.address);
+                              if (emptyIndex !== -1) {
+                                handleUpdateAllocation(emptyIndex, 'address', addr.address);
+                                handleUpdateAllocation(emptyIndex, 'label', addr.label);
+                              } else if (allocations.length < 5) {
+                                setAllocations([...allocations, { label: addr.label, address: addr.address, percentage: 0 }]);
+                              }
+                            }}
+                            className="text-[10px] text-white/60 hover:text-white transition-all"
+                          >
+                            {addr.label}
+                          </button>
+                        )}
+                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => setEditingAddressId(addr.id)} className="p-0.5 text-white/30 hover:text-blue-400">
+                            <Edit3 className="w-2.5 h-2.5" />
+                          </button>
+                          <button onClick={() => removeAddress(addr.id)} className="p-0.5 text-white/30 hover:text-red-400">
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {savedAddresses.length === 0 && <p className="text-[10px] text-white/20 italic">No addresses saved yet</p>}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        )}
+        </div>
 
         <div className="space-y-4">
           <div className="hidden md:grid grid-cols-[1fr_2fr_100px_80px] gap-4 px-4 text-xs font-bold text-white/30 uppercase tracking-widest">
@@ -506,13 +563,24 @@ export function FlowBuilder() {
               placeholder="Name this rule..."
               className="flex-1 bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm text-white focus:border-blue-500 focus:ring-0 outline-none"
             />
-            <button
-              onClick={handleSaveRule}
-              disabled={!ruleName || totalPercentage !== 100}
-              className="px-6 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-500/20 transition-all"
-            >
-              Save Rule
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveRule}
+                disabled={!ruleName || totalPercentage !== 100}
+                className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 text-sm font-bold rounded-xl border border-purple-500/20 transition-all flex items-center gap-2"
+              >
+                {editMode === 'rule' ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {editMode === 'rule' ? 'Update Rule' : 'Save Rule'}
+              </button>
+              <button
+                onClick={handleSaveTemplate}
+                disabled={!ruleName || totalPercentage !== 100}
+                className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-bold rounded-xl border border-blue-500/20 transition-all flex items-center gap-2"
+              >
+                {editMode === 'template' ? <Save className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                {editMode === 'template' ? 'Update Template' : 'Save Template'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -595,7 +663,7 @@ export function FlowBuilder() {
                     <div className="flex flex-col items-center gap-1">
                       <div className="flex items-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">{txStep === 'approving' ? 'Step 1: Approving' : 'Step 2: Executing'}</span>
+                        <span className="text-xs">{txStep === 'approving' ? 'Step 1: Approving' : 'Step 2: Executing'}</span>
                       </div>
                       <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
                         <motion.div 
@@ -626,54 +694,53 @@ export function FlowBuilder() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative max-w-md w-full"
+              className="relative max-w-sm w-full"
             >
-              <div id="viral-card" className="bg-[#080808] p-10 rounded-[40px] border border-white/10 shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+              <div id="viral-card" className="bg-[#080808] p-6 rounded-[32px] border border-white/10 shadow-2xl relative overflow-hidden ring-1 ring-white/5">
                 {/* Close Button */}
                 <button 
                   onClick={() => setShowCard(false)}
-                  className="absolute top-6 right-6 z-20 text-white/20 hover:text-white transition-all bg-white/5 hover:bg-white/10 p-2 rounded-full border border-white/5"
+                  className="absolute top-4 right-4 z-20 text-white/20 hover:text-white transition-all bg-white/5 hover:bg-white/10 p-1.5 rounded-full border border-white/5"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
 
                 {/* Visual Flair */}
-                <div className="absolute top-[-10%] right-[-10%] w-[150px] h-[150px] bg-blue-500/20 blur-[60px] rounded-full" />
-                <div className="absolute bottom-[-10%] left-[-10%] w-[150px] h-[150px] bg-purple-500/10 blur-[60px] rounded-full" />
-                <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-[0.03] pointer-events-none" />
+                <div className="absolute top-[-10%] right-[-10%] w-[100px] h-[100px] bg-blue-500/20 blur-[50px] rounded-full" />
+                <div className="absolute bottom-[-10%] left-[-10%] w-[100px] h-[100px] bg-purple-500/10 blur-[50px] rounded-full" />
                 
                 <div className="relative z-10 flex flex-col items-center text-center">
-                  <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-blue-400 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-blue-500/40 rotate-3 group-hover:rotate-0 transition-transform duration-500">
-                    <Waves className="w-10 h-10 text-white" />
+                  <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-blue-400 rounded-2xl flex items-center justify-center mb-6 shadow-2xl shadow-blue-500/40 rotate-3 transition-transform duration-500">
+                    <Waves className="w-8 h-8 text-white" />
                   </div>
                   
-                  <h3 className="text-3xl font-bold text-white mb-2 tracking-tight">Flow Executed</h3>
-                  <div className="flex items-center gap-2 mb-10">
-                    <span className="h-[1px] w-4 bg-white/20" />
-                    <p className="text-blue-400/80 text-xs font-bold uppercase tracking-[0.3em]">StableFlow Protocol</p>
-                    <span className="h-[1px] w-4 bg-white/20" />
+                  <h3 className="text-2xl font-bold text-white mb-1 tracking-tight">Flow Executed</h3>
+                  <div className="flex items-center gap-2 mb-6">
+                    <span className="h-[1px] w-3 bg-white/20" />
+                    <p className="text-blue-400/80 text-[10px] font-bold uppercase tracking-[0.2em]">StableFlow Protocol</p>
+                    <span className="h-[1px] w-3 bg-white/20" />
                   </div>
                   
-                  <div className="w-full bg-white/[0.02] backdrop-blur-sm rounded-[32px] p-8 border border-white/[0.05] mb-8 shadow-inner">
-                    <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.25em] mb-4">Total Distribution</p>
-                    <p className="text-5xl font-mono font-bold text-white mb-8 tracking-tighter">
-                      {parseFloat(amount).toLocaleString()} <span className="text-xl font-sans text-blue-500">USDC</span>
+                  <div className="w-full bg-white/[0.02] backdrop-blur-sm rounded-[24px] p-6 border border-white/[0.05] mb-6">
+                    <p className="text-[9px] font-bold text-white/20 uppercase tracking-[0.2em] mb-2">Total Distribution</p>
+                    <p className="text-4xl font-mono font-bold text-white mb-6 tracking-tighter">
+                      {parseFloat(amount).toLocaleString()} <span className="text-lg font-sans text-blue-500">USDC</span>
                     </p>
                     
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {allocations.map((a, i) => (
-                        <div key={i} className="flex justify-between items-center text-sm">
-                          <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, 50%)` }} />
-                            <span className="text-white/70 font-medium">{a.label}</span>
+                        <div key={i} className="flex justify-between items-center text-xs">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: `hsl(${220 + (i * 25)}, 70%, 50%)` }} />
+                            <span className="text-white/70 font-medium truncate max-w-[100px]">{a.label}</span>
                           </div>
-                          <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-3">
                             <span className="text-white font-mono font-bold">{a.percentage}%</span>
-                            <div className="w-20 h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div className="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
                               <motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: `${a.percentage}%` }}
-                                className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" 
+                                className="h-full bg-blue-500" 
                               />
                             </div>
                           </div>
@@ -682,45 +749,41 @@ export function FlowBuilder() {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col items-center gap-4 w-full pt-4">
-                    <div className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[9px] font-bold text-white/40 uppercase tracking-[0.2em] mb-4">
-                      Immutable Proof on Arc Network
-                    </div>
-
+                  <div className="flex flex-col items-center gap-3 w-full pt-2">
                     <button 
                       onClick={() => copyToClipboard(lastTxHash)}
-                      className="flex items-center gap-2 text-[10px] font-mono text-white/20 hover:text-blue-400 transition-colors bg-white/5 px-3 py-1 rounded-lg border border-white/5"
+                      className="flex items-center gap-2 text-[9px] font-mono text-white/20 hover:text-blue-400 transition-colors bg-white/5 px-2 py-1 rounded-lg border border-white/5"
                     >
-                      TX: {lastTxHash.slice(0, 8)}...{lastTxHash.slice(-8)}
-                      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                      TX: {lastTxHash.slice(0, 6)}...{lastTxHash.slice(-6)}
+                      {copied ? <Check className="w-2.5 h-2.5 text-green-500" /> : <Copy className="w-2.5 h-2.5" />}
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-4 mt-6">
+              <div className="flex gap-3 mt-4">
                 <button
                   onClick={downloadCard}
                   disabled={isGenerating}
-                  className="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  className="flex-1 bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
                 >
-                  {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                  {isGenerating ? 'Generating...' : 'Download'}
+                  {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {isGenerating ? '...' : 'Download'}
                 </button>
                 <button
                   onClick={shareOnX}
-                  className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20"
+                  className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20"
                 >
-                  <Share2 className="w-5 h-5" />
-                  Share on X
+                  <Share2 className="w-4 h-4" />
+                  Share
                 </button>
               </div>
 
               <button
                 onClick={() => setShowCard(false)}
-                className="w-full mt-6 text-white/30 hover:text-white text-xs font-bold uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-2"
+                className="w-full mt-4 text-white/30 hover:text-white text-[10px] font-bold uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2"
               >
-                Continue to FlowBuilder
+                Close Receipt
               </button>
             </motion.div>
           </motion.div>
