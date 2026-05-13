@@ -53,7 +53,8 @@ export function FlowBuilder() {
   const usdcDecimals = balance?.decimals || 18;
   const amountBigInt = amount ? parseUnits(amount, usdcDecimals) : 0n;
   const amountValid = !!amount && parseFloat(amount) > 0;
-  const isInsufficientBalance = balance ? balance.value < amountBigInt : false;
+  const gasBuffer = parseUnits('0.1', usdcDecimals);
+  const isInsufficientBalance = balance ? balance.value < (amountBigInt + gasBuffer) : false;
   
   // Ensure every row with a percentage has an address
   const allRowsComplete = allocations.every(a => 
@@ -528,7 +529,13 @@ export function FlowBuilder() {
               />
               <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-3">
                 <button
-                  onClick={() => balance && setAmount(formatUnits(balance.value, balance.decimals))}
+                  onClick={() => {
+                    if (balance) {
+                      const buffer = parseUnits('0.1', balance.decimals);
+                      const maxAmount = balance.value > buffer ? balance.value - buffer : 0n;
+                      setAmount(formatUnits(maxAmount, balance.decimals));
+                    }
+                  }}
                   className="text-[10px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 px-2 py-1 rounded uppercase tracking-wider transition-colors"
                 >
                   Max
