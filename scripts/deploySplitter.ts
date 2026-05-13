@@ -1,9 +1,12 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
 
 async function main() {
-  console.log("Deploying StableFlowSplitter...");
+  console.log("Deploying StableFlowSplitter via Ethers...");
 
-  const Splitter = await ethers.getContractFactory("StableFlowSplitter");
+  const [deployer] = await hre.ethers.getSigners();
+  console.log(`Deploying with account: ${deployer.address}`);
+
+  const Splitter = await hre.ethers.getContractFactory("StableFlowSplitter");
   const splitter = await Splitter.deploy();
 
   await splitter.waitForDeployment();

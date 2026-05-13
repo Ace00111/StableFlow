@@ -39,7 +39,7 @@ const SPLITTER_ABI = [
 ];
 
 async function main() {
-  const amount = parseUnits('10', 6); // 10 USDC (6 decimals)
+  const amount = parseUnits('10', 18); // 10 USDC (Arc native is 18 decimals)
 
   // 1️⃣ Ensure we have enough USDC – if not, mint from a faucet or use an address that already holds USDC.
   const balance = await publicClient.readContract({

@@ -1,5 +1,5 @@
 export const USDC_ADDRESS = '0x3600000000000000000000000000000000000000' as `0x${string}`;
-export const SPLITTER_ADDRESS = '0x867650F5eAe8df91445971f14d89fd84F0C9a9f8' as `0x${string}`; // StableFlowSplitter contract address on Arc Testnet
+export const SPLITTER_ADDRESS = '0x9999F9Aa01355eb1DCf0f18A7C9103b861eB3493' as `0x${string}`; // StableFlowSplitter contract address on Arc Testnet
 
 export const USDC_ABI = [
   {
@@ -59,7 +59,7 @@ export const SPLITTER_ABI = [
     ],
     name: "executeSplit",
     outputs: [],
-    stateMutability: "nonpayable",
+    stateMutability: "payable",
     type: "function",
   },
 ] as const;

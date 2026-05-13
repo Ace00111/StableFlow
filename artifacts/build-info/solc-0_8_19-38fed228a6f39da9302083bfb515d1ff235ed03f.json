@@ -1,0 +1,46 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_19-38fed228a6f39da9302083bfb515d1ff235ed03f",
+  "solcVersion": "0.8.19",
+  "solcLongVersion": "0.8.19+commit.7dd6d404",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/StableFlowSplitter.sol": "project/contracts/StableFlowSplitter.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "paris",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/StableFlowSplitter.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.19;\n\n/**\n * @title StableFlowSplitter\n * @dev A lightweight splitter contract for USDC on Arc Testnet.\n * Designed to take a single payment and distribute it to multiple wallets atomically.\n */\ncontract StableFlowSplitter {\n    event FlowExecuted(\n        address indexed sender,\n        address indexed token,\n        uint256 totalAmount,\n        uint256 recipientCount\n    );\n\n    /**\n     * @dev Executes a split of ERC20 tokens.\n     * @param token The address of the token (e.g. USDC).\n     * @param recipients Array of recipient addresses.\n     * @param basisPoints Array of percentages in basis points (10000 = 100.00%).\n     * @param totalAmount The total amount to be split.\n     */\n    function executeSplit(\n        address token,\n        address[] calldata recipients,\n        uint256[] calldata basisPoints,\n        uint256 totalAmount\n    ) external payable {\n        uint256 len = recipients.length;\n        require(len > 0, \"No recipients\");\n        require(len == basisPoints.length, \"Mismatch lengths\");\n        require(totalAmount > 0, \"Amount must be > 0\");\n\n        // If msg.value is sent, it must match totalAmount (Native USDC case)\n        if (msg.value > 0) {\n            require(msg.value == totalAmount, \"Value mismatch\");\n            // Ensure we are supposedly splitting the native token address\n            require(token == address(0) || token == 0x3600000000000000000000000000000000000000, \"Value sent for non-native token\");\n        } else {\n            // Pull total amount from sender to this contract (Standard ERC20 case)\n            _safeTransferFrom(token, msg.sender, address(this), totalAmount);\n        }\n\n        uint256 totalBasisPoints = 0;\n        uint256 remaining = totalAmount;\n\n        for (uint256 i = 0; i < len; i++) {\n            totalBasisPoints += basisPoints[i];\n            \n            if (i == len - 1) {\n                // Last recipient gets exactly what's left to ensure 100% distribution\n                if (remaining > 0) {\n                    _safeTransfer(token, recipients[i], remaining);\n                }\n            } else {\n                uint256 amount = (totalAmount * basisPoints[i]) / 10000;\n                if (amount > 0) {\n                    _safeTransfer(token, recipients[i], amount);\n                    remaining -= amount;\n                }\n            }\n        }\n\n        require(totalBasisPoints == 10000, \"Must sum to 100%\");\n        emit FlowExecuted(msg.sender, token, totalAmount, len);\n    }\n\n    /**\n     * @dev Low-level safe transfer to handle tokens that don't return bool.\n     */\n    function _safeTransfer(address token, address to, uint256 value) internal {\n        if (token == address(0) || token == 0x3600000000000000000000000000000000000000) {\n            // Native token: send via plain call with value\n            (bool success, ) = payable(to).call{value: value}(\"\");\n            require(success, \"Native transfer failed\");\n        } else {\n            // ERC20 token: use transfer selector\n            (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0xa9059cbb, to, value));\n            require(success && (data.length == 0 || abi.decode(data, (bool))), \"Transfer failed\");\n        }\n    }\n\n    /**\n     * @dev Low-level safe transferFrom to handle tokens that don't return bool.\n     */\n    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {\n        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x23b872dd, from, to, value));\n        require(success && (data.length == 0 || abi.decode(data, (bool))), \"TransferFrom failed\");\n    }\n}\n"
+      }
+    }
+  }
+}

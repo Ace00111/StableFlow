@@ -26,14 +26,21 @@ contract StableFlowSplitter {
         address[] calldata recipients,
         uint256[] calldata basisPoints,
         uint256 totalAmount
-    ) external {
+    ) external payable {
         uint256 len = recipients.length;
         require(len > 0, "No recipients");
         require(len == basisPoints.length, "Mismatch lengths");
         require(totalAmount > 0, "Amount must be > 0");
 
-        // Pull total amount from sender to this contract
-        _safeTransferFrom(token, msg.sender, address(this), totalAmount);
+        // If msg.value is sent, it must match totalAmount (Native USDC case)
+        if (msg.value > 0) {
+            require(msg.value == totalAmount, "Value mismatch");
+            // Ensure we are supposedly splitting the native token address
+            require(token == address(0) || token == 0x3600000000000000000000000000000000000000, "Value sent for non-native token");
+        } else {
+            // Pull total amount from sender to this contract (Standard ERC20 case)
+            _safeTransferFrom(token, msg.sender, address(this), totalAmount);
+        }
 
         uint256 totalBasisPoints = 0;
         uint256 remaining = totalAmount;
@@ -63,8 +70,15 @@ contract StableFlowSplitter {
      * @dev Low-level safe transfer to handle tokens that don't return bool.
      */
     function _safeTransfer(address token, address to, uint256 value) internal {
-        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0xa9059cbb, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "Transfer failed");
+        if (token == address(0) || token == 0x3600000000000000000000000000000000000000) {
+            // Native token: send via plain call with value
+            (bool success, ) = payable(to).call{value: value}("");
+            require(success, "Native transfer failed");
+        } else {
+            // ERC20 token: use transfer selector
+            (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0xa9059cbb, to, value));
+            require(success && (data.length == 0 || abi.decode(data, (bool))), "Transfer failed");
+        }
     }
 
     /**
