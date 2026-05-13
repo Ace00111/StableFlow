@@ -51,7 +51,7 @@ export function FlowBuilder() {
   
   // Use dynamic decimals from balance hook (Arc USDC is 18)
   const usdcDecimals = balance?.decimals || 18;
-  const amountBigInt = amount ? parseUnits(amount, usdcDecimals) : 0n;
+  const amountBigInt = amount ? parseUnits(amount, usdcDecimals) : BigInt(0);
   const amountValid = !!amount && parseFloat(amount) > 0;
   const gasBuffer = parseUnits('0.1', usdcDecimals);
   const isInsufficientBalance = balance ? balance.value < (amountBigInt + gasBuffer) : false;
@@ -111,7 +111,7 @@ export function FlowBuilder() {
       setTxStep('approving');
 
       // 1. Pre-execution balance check (use native balance since USDC is the gas token)
-      const senderBalance = balance?.value ?? 0n;
+      const senderBalance = balance?.value ?? BigInt(0);
 
       if (senderBalance < amountBigInt) {
         throw new Error('Insufficient USDC balance');
@@ -177,7 +177,7 @@ export function FlowBuilder() {
         abi: SPLITTER_ABI,
         functionName: 'executeSplit',
         args: [USDC_ADDRESS, recipients, basisPoints, amountBigInt],
-        value: isNativeUSDC ? amountBigInt : 0n, // Send USDC as value if native
+        value: isNativeUSDC ? amountBigInt : BigInt(0), // Send USDC as value if native
       });
 
       console.log('Transaction Hash:', splitHash);
@@ -532,7 +532,7 @@ export function FlowBuilder() {
                   onClick={() => {
                     if (balance) {
                       const buffer = parseUnits('0.1', balance.decimals);
-                      const maxAmount = balance.value > buffer ? balance.value - buffer : 0n;
+                      const maxAmount = balance.value > buffer ? balance.value - buffer : BigInt(0);
                       setAmount(formatUnits(maxAmount, balance.decimals));
                     }
                   }}
