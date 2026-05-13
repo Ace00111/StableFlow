@@ -1,8 +1,9 @@
 'use client';
 
+import React, { useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { useFlowStore } from "@/store/useFlowStore";
-import { Clock, ExternalLink, TrendingUp, Wallet, ArrowUpRight, User, CircleDollarSign } from "lucide-react";
+import { Clock, ExternalLink, TrendingUp, Wallet, ArrowUpRight, User, CircleDollarSign, Trash2 } from "lucide-react";
 import { formatUnits } from "viem";
 import { useAccount, useBalance } from "wagmi";
 import Link from "next/link";
@@ -10,11 +11,13 @@ import { USDC_ADDRESS } from "@/constants/contracts";
 
 export default function Dashboard() {
   const { address, isConnected } = useAccount();
-  const { history, rules } = useFlowStore();
+  const { history, rules, removeRule } = useFlowStore();
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const visibleHistory = showAllHistory ? history : history.slice(0, 5);
 
   const { data: usdcBalance } = useBalance({
     address,
-    token: USDC_ADDRESS as `0x${string}`,
+    token: USDC_ADDRESS,
   });
 
   const totalVolume = history.reduce((sum, item) => sum + parseFloat(item.amount), 0);
@@ -100,7 +103,14 @@ export default function Dashboard() {
                   Transaction Activity
                   <span className="text-xs bg-blue-500/10 px-2 py-1 rounded text-blue-400 font-mono">{history?.length || 0}</span>
                 </h2>
-                <button className="text-xs font-bold text-white/20 hover:text-white transition-colors uppercase tracking-widest">View All</button>
+                {history.length > 5 && (
+                  <button
+                    onClick={() => setShowAllHistory(!showAllHistory)}
+                    className="text-xs font-bold text-white/20 hover:text-white transition-colors uppercase tracking-widest"
+                  >
+                    {showAllHistory ? 'Show Less' : 'View All'}
+                  </button>
+                )}
               </div>
               
               <div className="grid gap-4">
@@ -109,7 +119,7 @@ export default function Dashboard() {
                     <p className="text-white/20">No transactions recorded in this workspace.</p>
                   </div>
                 ) : (
-                  history.map((item) => (
+                  visibleHistory.map((item) => (
                     <div key={item.id} className="glass-card p-4 md:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:border-white/20 transition-all">
                       <div className="flex items-center gap-4 md:gap-5">
                         <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-all shadow-lg shadow-blue-500/5 flex-shrink-0">
@@ -162,10 +172,19 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   rules.map((rule) => (
-                    <div key={rule.id} className="p-4 bg-white/5 rounded-2xl hover:bg-white/[0.08] transition-all cursor-pointer group">
+                    <div key={rule.id} className="p-4 bg-white/5 rounded-2xl hover:bg-white/[0.08] transition-all group">
                       <div className="flex justify-between items-start mb-4">
                         <h3 className="font-bold text-sm text-white/80">{rule.name}</h3>
-                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-lg shadow-green-500/20" />
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-green-500 shadow-lg shadow-green-500/20" />
+                          <button
+                            onClick={() => removeRule(rule.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-white/30 hover:text-red-400"
+                            title="Delete rule"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                       <div className="space-y-2">
                         {rule.allocations.map((a, i) => (
@@ -179,8 +198,11 @@ export default function Dashboard() {
                   ))
                 )}
               </div>
-              <button className="w-full mt-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold text-white/40 transition-all border border-white/5">
-                Manage All Rules
+              <button
+                onClick={() => rules.forEach(r => removeRule(r.id))}
+                className="w-full mt-6 py-3 rounded-xl bg-white/5 hover:bg-red-500/10 text-xs font-bold text-white/40 hover:text-red-400 transition-all border border-white/5"
+              >
+                Clear All Rules
               </button>
             </div>
 

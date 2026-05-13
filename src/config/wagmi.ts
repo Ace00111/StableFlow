@@ -8,7 +8,7 @@ export const arcTestnet = defineChain({
   nativeCurrency: {
     name: 'USDC',
     symbol: 'USDC',
-    decimals: 6,
+    decimals: 18,
   },
   rpcUrls: {
     default: {
@@ -24,9 +24,13 @@ export const arcTestnet = defineChain({
   testnet: true,
 });
 
+if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_WAGMI_PROJECT_ID) {
+  console.warn('[StableFlow] NEXT_PUBLIC_WAGMI_PROJECT_ID is not set. WalletConnect will not work.');
+}
+
 export const config = getDefaultConfig({
   appName: 'StableFlow',
-  projectId: process.env.NEXT_PUBLIC_WAGMI_PROJECT_ID || 'YOUR_PROJECT_ID',
+  projectId: process.env.NEXT_PUBLIC_WAGMI_PROJECT_ID || '',
   chains: [arcTestnet],
   transports: {
     [arcTestnet.id]: http(),

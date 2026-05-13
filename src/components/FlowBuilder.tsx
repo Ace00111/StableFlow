@@ -6,7 +6,7 @@ import { Plus, Trash2, Send, CheckCircle2, Loader2, Share2, Download, X, Copy, C
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount, useWriteContract, useConfig, useBalance } from 'wagmi';
 import { parseUnits, formatUnits, isAddress } from 'viem';
-import { waitForTransactionReceipt } from 'wagmi/actions';
+import { waitForTransactionReceipt, readContract } from 'wagmi/actions';
 import { USDC_ADDRESS, USDC_ABI, SPLITTER_ADDRESS, SPLITTER_ABI } from '@/constants/contracts';
 import { useFlowStore, Allocation } from '@/store/useFlowStore';
 import { toPng } from 'html-to-image';
@@ -25,6 +25,11 @@ export function FlowBuilder() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [ruleName, setRuleName] = useState('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   const PRESETS = [
     { name: 'Equal Split', allocations: [{ label: 'Wallet 1', address: '', percentage: 50 }, { label: 'Wallet 2', address: '', percentage: 50 }] },
@@ -37,15 +42,17 @@ export function FlowBuilder() {
   const { writeContractAsync } = useWriteContract();
   const { rules, addRule, addToHistory, savedAddresses, addAddress, removeAddress } = useFlowStore();
   const [showAddressBook, setShowAddressBook] = useState(false);
-  const { data: balance } = useBalance({
+  const { data: balance, refetch: refetchBalance } = useBalance({
     address,
-    token: USDC_ADDRESS as `0x${string}`,
+    token: USDC_ADDRESS,
   });
 
   const totalPercentage = allocations.reduce((sum, a) => sum + (Number(a.percentage) || 0), 0);
   const allAddressesValid = allocations.every(a => isAddress(a.address));
   const amountValid = amount && Number(amount) > 0;
-  const isValid = totalPercentage === 100 && allocations.length >= 2 && allAddressesValid && amountValid;
+  const amountBigInt = amount ? parseUnits(amount, 6) : 0n;
+  const isInsufficientBalance = balance ? balance.value < amountBigInt : false;
+  const isValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.length >= 2 && allAddressesValid && amountValid && !isInsufficientBalance;
 
   const handleAddAllocation = () => {
     if (allocations.length >= 5) return;
@@ -82,50 +89,89 @@ export function FlowBuilder() {
   };
 
   const handleExecute = async () => {
-    if (!isValid) return;
-    
+    if (!isValid || !address) return;
+    const amountBigInt = parseUnits(amount, 6);
+
     try {
       setTxStep('approving');
-      const amountBigInt = parseUnits(amount, 6);
-      
-      // Approval
-      const approveHash = await writeContractAsync({
-        address: USDC_ADDRESS as `0x${string}`,
-        abi: USDC_ABI,
-        functionName: 'approve',
-        args: [SPLITTER_ADDRESS as `0x${string}`, amountBigInt],
-      });
 
-      // Wait for approval
-      await waitForTransactionReceipt(config, {
-        hash: approveHash,
-      });
+      // 1. Pre-execution balance check
+      const senderBalance = await readContract(config, {
+        address: USDC_ADDRESS,
+        abi: USDC_ABI,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+      }) as bigint;
+
+      if (senderBalance < amountBigInt) {
+        throw new Error('Insufficient USDC balance');
+      }
+
+      // 2. Allowance check and Approval
+      const currentAllowance = await readContract(config, {
+        address: USDC_ADDRESS,
+        abi: USDC_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, SPLITTER_ADDRESS],
+      }) as bigint;
+
+      if (currentAllowance < amountBigInt) {
+        const approveHash = await writeContractAsync({
+          address: USDC_ADDRESS,
+          abi: USDC_ABI,
+          functionName: 'approve',
+          args: [SPLITTER_ADDRESS, amountBigInt],
+        });
+        await waitForTransactionReceipt(config, { hash: approveHash });
+      }
 
       setTxStep('executing');
-      // Split
-      const recipients = allocations.map(a => a.address as `0x${string}`);
-      const basisPoints = allocations.map(a => BigInt(a.percentage * 100));
+
+      // 3. Prepare recipients and basis points
+      const validAllocs = allocations.filter((a) => isAddress(a.address));
+      const recipients = validAllocs.map((a) => a.address as `0x${string}`);
       
-      const splitHash = await writeContractAsync({
-        address: SPLITTER_ADDRESS as `0x${string}`,
-        abi: SPLITTER_ABI,
-        functionName: 'executeSplit',
-        args: [USDC_ADDRESS as `0x${string}`, recipients, basisPoints, amountBigInt],
+      // Calculate basis points (100% = 10000). The contract expects values that sum to 10000.
+      const roundedBps = validAllocs.map((a) => Math.round(a.percentage * 100));
+      const totalBps = roundedBps.reduce((s, v) => s + v, 0);
+      
+      // Handle rounding error by adjusting the largest share or last recipient
+      if (totalBps !== 10000) {
+        roundedBps[roundedBps.length - 1] += (10000 - totalBps);
+      }
+      
+      const basisPoints = roundedBps.map((b) => BigInt(b));
+
+      console.log('Distributing USDC:', {
+        total: amount,
+        recipients,
+        basisPoints: basisPoints.map(b => b.toString())
       });
 
-      // Wait for split
-      await waitForTransactionReceipt(config, {
-        hash: splitHash,
+      console.log('--- Debug Transaction Info ---');
+      console.log('User Address:', address);
+      console.log('Splitter Address:', SPLITTER_ADDRESS);
+      console.log('USDC Balance:', formatUnits(senderBalance, 6));
+      console.log('USDC Allowance:', formatUnits(currentAllowance, 6));
+      console.log('Target Amount:', amount);
+      console.log('Recipients:', recipients);
+      console.log('Basis Points:', basisPoints.map(b => b.toString()));
+      console.log('------------------------------');
+
+      // 4. Execute Split
+      const splitHash = await writeContractAsync({
+        address: SPLITTER_ADDRESS,
+        abi: SPLITTER_ABI,
+        functionName: 'executeSplit',
+        args: [USDC_ADDRESS, recipients, basisPoints, amountBigInt],
       });
+
+      console.log('Transaction Hash:', splitHash);
+      const receipt = await waitForTransactionReceipt(config, { hash: splitHash });
+      console.log('Transaction Receipt:', receipt);
 
       setLastTxHash(splitHash);
       setTxStep('success');
-      confetti({
-        particleCount: 150,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#3b82f6', '#ffffff', '#60a5fa']
-      });
       
       addToHistory({
         amount,
@@ -133,22 +179,22 @@ export function FlowBuilder() {
         txHash: splitHash,
         allocations: [...allocations],
       });
-
+      
+      void refetchBalance();
       setShowCard(true);
+      setTxStep('idle');
+      setRuleName('');
+      confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#3b82f6', '#8b5cf6', '#ffffff']
+      });
 
-      // Auto-save recipients to Address Book
-      if (allocations) {
-        allocations.forEach(alloc => {
-          if (alloc.address && isAddress(alloc.address)) {
-            const exists = savedAddresses?.find(a => a.address.toLowerCase() === alloc.address.toLowerCase());
-            if (!exists) {
-              addAddress({ label: alloc.label || 'Recent Wallet', address: alloc.address });
-            }
-          }
-        });
-      }
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error('Flow Execution Error:', error);
+      const errMsg = error?.shortMessage || error?.message || 'Transaction failed';
+      alert(errMsg); // Basic alert for now, could be a toast
       setTxStep('idle');
     }
   };
@@ -361,8 +407,13 @@ export function FlowBuilder() {
                     <div className="relative">
                       <input
                         type="number"
+                        min={0}
+                        max={100}
                         value={alloc.percentage}
-                        onChange={(e) => handleUpdateAllocation(index, 'percentage', parseInt(e.target.value) || 0)}
+                        onChange={(e) => {
+                          const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+                          handleUpdateAllocation(index, 'percentage', val);
+                        }}
                         className="w-full bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-sm text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all"
                       />
                       <span className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 text-[10px]">%</span>
@@ -372,7 +423,12 @@ export function FlowBuilder() {
                     <button
                       onClick={() => {
                         if (alloc.address && isAddress(alloc.address)) {
-                          addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                          const exists = savedAddresses?.find(
+                            (a) => a.address.toLowerCase() === alloc.address.toLowerCase()
+                          );
+                          if (!exists) {
+                            addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                          }
                         }
                       }}
                       disabled={!isAddress(alloc.address)}
@@ -393,7 +449,12 @@ export function FlowBuilder() {
                   <button
                     onClick={() => {
                       if (alloc.address && isAddress(alloc.address)) {
-                        addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                        const exists = savedAddresses?.find(
+                          (a) => a.address.toLowerCase() === alloc.address.toLowerCase()
+                        );
+                        if (!exists) {
+                          addAddress({ label: alloc.label || 'Saved Wallet', address: alloc.address });
+                        }
                       }
                     }}
                     disabled={!isAddress(alloc.address)}
@@ -450,14 +511,27 @@ export function FlowBuilder() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 text-2xl font-mono text-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
+                className={`w-full bg-white/[0.03] border ${isInsufficientBalance ? 'border-red-500/50' : 'border-white/10'} rounded-2xl py-4 px-6 text-2xl font-mono text-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none`}
               />
-              <div className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 font-bold">USDC</div>
+              <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-3">
+                <button
+                  onClick={() => balance && setAmount(formatUnits(balance.value, 6))}
+                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 px-2 py-1 rounded uppercase tracking-wider transition-colors"
+                >
+                  Max
+                </button>
+                <div className="text-white/20 font-bold">USDC</div>
+              </div>
             </div>
+            {isInsufficientBalance && (
+              <p className="text-[10px] text-red-400 font-bold uppercase tracking-wider px-2 mt-1">
+                Insufficient balance (Available: {balance ? formatUnits(balance.value, 6) : '0'})
+              </p>
+            )}
           </div>
           
           <div className="w-full sm:w-auto">
-            {!isConnected ? (
+            {(!mounted || !isConnected) ? (
               <div className="w-full sm:w-[200px]">
                 <ConnectButton.Custom>
                   {({ openConnectModal }) => (
@@ -475,6 +549,8 @@ export function FlowBuilder() {
                 <div className="mb-2 text-right">
                   {!amountValid ? (
                     <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Enter Amount</span>
+                  ) : isInsufficientBalance ? (
+                    <span className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Insufficient USDC</span>
                   ) : totalPercentage !== 100 ? (
                     <span className="text-[10px] text-red-400/60 font-bold uppercase tracking-wider">Sum must be 100%</span>
                   ) : !allAddressesValid ? (

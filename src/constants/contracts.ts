@@ -1,5 +1,5 @@
-export const USDC_ADDRESS = '0x3600000000000000000000000000000000000000';
-export const SPLITTER_ADDRESS = '0x867650F5eAe8df91445971f14d89fd84F0C9a9f8'; // Placeholder, using StableFX address from docs as a dummy or just a random one
+export const USDC_ADDRESS = '0x3600000000000000000000000000000000000000' as `0x${string}`;
+export const SPLITTER_ADDRESS = '0x867650F5eAe8df91445971f14d89fd84F0C9a9f8' as `0x${string}`; // StableFlowSplitter contract address on Arc Testnet
 
 export const USDC_ABI = [
   {
@@ -26,9 +26,30 @@ export const USDC_ABI = [
     outputs: [{ name: "", type: "uint8" }],
     type: "function",
   },
+  {
+    constant: true,
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    type: "function",
+  },
 ] as const;
 
 export const SPLITTER_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "sender", type: "address" },
+      { indexed: true, name: "token", type: "address" },
+      { indexed: false, name: "totalAmount", type: "uint256" },
+      { indexed: false, name: "recipientCount", type: "uint256" },
+    ],
+    name: "FlowExecuted",
+    type: "event",
+  },
   {
     inputs: [
       { name: "token", type: "address" },
